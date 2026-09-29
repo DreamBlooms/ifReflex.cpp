@@ -1,0 +1,79 @@
+cmake_minimum_required(VERSION 3.14)
+project(ifreflex-llama CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release)
+endif()
+
+# Pinned llama.cpp tree vendored under third_party/llama.cpp (release v0.4.1).
+set(LLAMA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/llama.cpp" CACHE PATH "llama.cpp checkout")
+if(NOT EXISTS "${LLAMA_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR
+        "llama.cpp not found at ${LLAMA_DIR}. Run: git submodule update --init --depth 1")
+endif()
+
+set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_MTMD OFF CACHE BOOL "" FORCE)
+
+option(IFREFLEX_STATIC "Link libraries statically" OFF)
+if(IFREFLEX_STATIC)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+else()
+    set(BUILD_SHARED_LIBS ON CACHE BOOL "" FORCE)
+endif()
+
+option(IFREFLEX_CUDA   "Build with the CUDA backend"   OFF)
+option(IFREFLEX_VULKAN "Build with the Vulkan backend" OFF)
+option(IFREFLEX_HIP    "Build with the ROCm/HIP backend" OFF)
+option(IFREFLEX_METAL  "Build with the Metal backend"  OFF)
+if(IFREFLEX_CUDA)
+    set(GGML_CUDA ON CACHE BOOL "" FORCE)
+endif()
+if(IFREFLEX_VULKAN)
+    set(GGML_VULKAN ON CACHE BOOL "" FORCE)
+endif()
+if(IFREFLEX_HIP)
+    set(GGML_HIP ON CACHE BOOL "" FORCE)
+endif()
+if(IFREFLEX_METAL)
+    set(GGML_METAL ON CACHE BOOL "" FORCE)
+endif()
+
+add_subdirectory("${LLAMA_DIR}" "${CMAKE_BINARY_DIR}/llama.cpp")
+
+# nlohmann/json is header-only and vendored under third_party/nlohmann so the
+# build stays self-contained and cross-compilable (no host /usr/include leaks).
+# The HTTP transport is adapted from lkarlslund/laya.cpp (MIT).
+find_package(Threads REQUIRED)
+
+add_executable(ifreflex-cli
+    src/main.cpp
+    src/engine.cpp
+    src/prompt.cpp
+    src/readout.cpp
+    src/protocol.cpp
+    src/http.cpp
+)
+target_include_directories(ifreflex-cli PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
+)
+target_link_libraries(ifreflex-cli PRIVATE llama Threads::Threads)
+if(WIN32)
+    target_link_libraries(ifreflex-cli PRIVATE ws2_32)  # Winsock for cpp-httplib
+endif()
+
+# Parity tests: numeric readout and prompt layout verified against the reference
+# implementations (reflex, SemIf). Built and run via `ctest`.
+enable_testing()
+add_executable(test_readout scripts/parity/test_readout.cpp src/readout.cpp)
+target_include_directories(test_readout PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
+)
+add_test(NAME readout_parity COMMAND test_readout)

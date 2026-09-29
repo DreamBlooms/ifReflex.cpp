@@ -1,0 +1,226 @@
+# ifreflex.cpp
+
+English | [简体中文](README.zh-CN.md)
+
+**Any LLM. Structured decisions. No generation. No GPU.**
+
+Native C++ inference for **System One** decision models, built on
+[llama.cpp](https://github.com/ggml-org/llama.cpp). You send a piece of `state`
+and a map of typed `questions`; it answers every one in a single forward pass and
+returns the full probability distribution over your exact options — no prose, no
+parsing, no `"As an AI language model"`. Answers are read straight off the model's
+next-token logits, so output cost is zero generated tokens.
+
+One binary covers four systems: [reflex](https://github.com/kshetrajna12/reflex),
+[SemIf](https://github.com/TheoLeeCJ/SemIf-OpenJev), RWKV-Jev, and any stock
+instruct GGUF. It speaks the same `POST /v1/systemone` contract as TypeSafe's Jev,
+so a client written for Jev points at a local server unchanged.
+
+## One message, several decisions
+
+Serve the model:
+
+```sh
+build/ifreflex-cli --server --port 8080 --model Qwen3.5-4B-Q4_K_M.gguf \
+  --prompt reflex_markdown --permutations 2
+```
+
+Route a support request and check whether it asks for a refund in the same call:
+
+```sh
+curl http://127.0.0.1:8080/v1/systemone -H 'Content-Type: application/json' \
+  -d '{"state":{"message":"I was charged twice. Please refund the duplicate."},
+       "questions":{"route":{"type":"choice","instructions":"Which team should handle this?",
+         "criteria":["billing","technical support","sales"]},
+         "refund":{"type":"noul","instructions":"Is a refund requested?"}}}'
+```
+
+```json
+{"model":"ifreflex",
+ "answers":{
+   "route":{"type":"choice","confidence":0.2632,
+     "probabilities":{"billing":0.6223,"technical support":0.3283,"sales":0.0494},
+     "choice":"billing"},
+   "refund":{"type":"noul","noul":0.9572}},
+ "usage":{"input_tokens":93,"output_tokens":0,"state_tokens":51,
+          "question_tokens":42,"state_cache_hit":false}}
+```
+
+Three primitives, matching TypeSafe: `choice` picks one option and reports the
+whole distribution; `score` reports a probability-weighted value across your
+ordered levels; `noul` reports P(true). `/health` and `/v1/models` describe the
+server. Pass `--api-key KEY` to require `Authorization: Bearer KEY`, and
+`--cors-origin ORIGIN` to restrict CORS (open by default). Run a file of requests
+with `--input requests.jsonl`, or add `--raw` to print uncalibrated readout
+probabilities.
+
+## How it works
+
+Everything is **prefill only** — there is no autoregressive loop. A request is
+rendered as a shared `state` prefix plus one branch per question (and, for the
+letter readouts, one per option order). The state prefix is decoded **once**, and
+each branch restores a snapshot of that decoded state (the KV cache for attention
+models, the recurrent state for RWKV/hybrid) before appending its own tokens; the
+last-position next-token logits are then restricted to the option labels. A softmax
+over just those logits *is* the answer distribution.
+
+Decoded prefixes are also kept **across requests** in a bounded LRU
+(`--prefix-cache-mib`, default 256 MiB) keyed by the exact prefix tokens, so a
+state seen before skips its prefill; the gain grows with state length and reuse.
+The model weights themselves are loaded once and stay resident for the process.
+
+The label depends on the prompt style: a single option letter (`A`, `B`, …), or —
+for RWKV-Jev — the full option word. No trained classification head is needed, so
+any stock instruct GGUF works.
+
+## Prompt styles
+
+`--prompt` selects the layout, which is how **reflex / SemIf / RWKV-Jev are
+switched**:
+
+| `--prompt` | Layout | Readout | Options |
+| --- | --- | --- | --- |
+| `reflex_markdown` (default) | `# Evidence / # Criterion / # Options` headings, `A. key: desc` | letter | up to 26 |
+| `reflex_compact` | one JSON object `{"state","question","options":[{letter,text}]}` | letter | up to 26 |
+| `semif` | one JSON object `{"evidence","criterion","options":[{letter,description}]}` | letter | up to 16 |
+| `rwkv_jev` | question catalog in the system prefix + per-question JSON field lead; `noul` uses a `Q: … A:` slot with calibration examples | word (fork) | up to 128 |
+
+The letter styles read a single token at the decision slot. `rwkv_jev` reads the
+full option **words** with a *fork* readout: the candidate tokens form a prefix
+trie, and each fork takes one restricted softmax. When the candidates start with
+different tokens — the common case — that is exactly one softmax, so it costs the
+same as a letter readout.
+
+`--template` selects the chat wrapper to match the model family: `chatml` (Qwen,
+default), `gemma4`, `granite4`, `rwkv` (`System:` / `User:` / `Assistant:`),
+`plain`, `native`, or `auto`. `rwkv_jev` builds the `System:` / `User:` /
+`Assistant:` skeleton itself, so its `--template` is ignored.
+
+`--template native` renders the GGUF's own chat template with llama.cpp's
+`llama_chat_apply_template` and splits it around the user body — so **any template
+in llama.cpp's built-in list works without reimplementation** (llama2/3, mistral,
+deepseek, command-r, phi, granite, rwkv-world, …). Any of those names may also be
+passed directly (`--template llama3`, `--list-templates` prints them). It throws
+for arbitrary Jinja llama.cpp cannot run (e.g. Gemma-4's `<|turn>` macros).
+
+`--template auto` reads the GGUF's built-in `tokenizer.chat_template`
+(`--show-template` prints it), prefers the matching built-in wrapper above, and
+falls back to `native` when the family is unknown.
+
+**Decisions never reason.** Readout wants a direct answer, so every wrapper
+suppresses thinking by default: `chatml` emits the empty `<think></think>` block,
+and `native` injects it automatically when the model's template gates reasoning
+with `<think>`.
+
+### Calibration
+
+`--calibration C.json` carries `{"temperature":{noul,choice,score},
+"head":[8 floats]}`. `temperature` is the per-primitive softmax temperature. When
+`head` is present, the temperature is predicted per question from cheap features
+of the branch (kind one-hot, `log(n_options)`, `log(state_tokens)/10`, normalised
+entropy, top-two margin) as `exp(clip(f · w, log 0.2, log 20))` — the reflex
+calibration head. Without `head`, the per-primitive temperatures apply.
+
+### Permutations
+
+`--permutations 2` (the reflex `stable` default) runs each question under two
+distinct option orders and averages the per-option probabilities, then
+renormalises. This cuts position bias at N× the branches. Binary questions always
+get the swap as their second order.
+
+## Build
+
+Requires CMake 3.14+ and a C++20 compiler:
+
+```sh
+git submodule update --init --depth 1
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j8
+```
+
+llama.cpp is pinned to release `v0.4.1` under `third_party/llama.cpp`;
+`-DLLAMA_DIR=...` points the build at another checkout. `nlohmann/json` and
+`cpp-httplib` are vendored under `third_party/`, so the build stays
+self-contained and cross-compilable.
+
+The default build is CPU only. CUDA, Vulkan, ROCm (HIP), and Metal are optional
+backends; enable one at configure time:
+
+```sh
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DIFREFLEX_CUDA=ON
+```
+
+Run the CLI:
+
+```sh
+build/ifreflex-cli --model Qwen3.5-0.8B-Q8_0.gguf --input requests.jsonl
+```
+
+### Flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--model M.gguf` | GGUF checkpoint (required) |
+| `--calibration C.json` | `{"temperature":{noul,choice,score},"head":[8 floats]}` |
+| `--prompt STYLE` | `reflex_markdown` \| `reflex_compact` \| `semif` \| `rwkv_jev` |
+| `--template STYLE` | `chatml` \| `gemma4` \| `granite4` \| `rwkv` \| `plain` \| `native` \| `auto` |
+| `--list-templates` | print llama.cpp's built-in chat template names and exit |
+| `--show-template` | print the GGUF's built-in chat template and exit |
+| `--permutations N` | average over N option orders (1–8, default 2) |
+| `--raw` | print uncalibrated readout probabilities |
+| `--threads N`, `--n-batch N`, `--ctx N`, `--gpu-layers N`, `--device D` | runtime |
+| `--prefix-cache-mib N` | decoded-prefix LRU budget (MiB, default 256; 0 disables) |
+| `--server --host --port --api-key --cors-origin --served-name` | HTTP |
+| `--input FILE` | offline: one request object per line |
+
+## Design note: the packed strategy
+
+reflex has two execution strategies: `packed`, which concatenates all branches into
+one sequence under a 4D block attention mask, and `batched`, which runs them as
+independent right-padded sequences over a shared cached state prefix.
+
+**ifreflex.cpp uses the batched semantics; dropping `packed` costs zero accuracy.**
+Both compute the same attention set per branch (a branch sees the state plus itself
+and nothing else), so they are two implementations of one semantics. The 4D mask is
+only a memory/scheduling optimisation, is not expressible in llama.cpp's KV-cache
+API, and reflex itself refuses to use it on hybrid backbones such as Qwen3.5. The
+batched path is the equivalent — and the only correct — choice here.
+
+## Parity
+
+Verified against the reference implementations (`scripts/parity/run.sh`, and
+`ctest -R readout_parity` for the readout math):
+
+* **Readout math** — softmax, normalised-entropy confidence, score expectation,
+  permutation merge, and the 8-weight calibration head agree with reflex to float
+  precision (max abs diff `6.8e-9`).
+* **Prompt text** — byte-identical to reflex (`reflex_markdown`, `reflex_compact`),
+  to SemIf (`semif`), and to `jev_like` (`rwkv_jev`).
+
+```sh
+REFLEX_SRC=~/reflex/src SEMIF_SRC=~/SemIf-OpenJev/src RWKV_SRC=~/rwkv-jev-like/src \
+  PYTHON=python3 scripts/parity/run.sh
+```
+
+
+## Credits
+
+* [reflex](https://github.com/kshetrajna12/reflex) (MIT) — prompt layouts, readout
+  math, calibration head, permutation averaging.
+* [SemIf / OpenJev](https://github.com/TheoLeeCJ/SemIf-OpenJev) (MIT) — the
+  direct-options readout method and the compact JSON prompt.
+* [rwkv-jev-like](https://github.com/1cyberlangke1/rwkv-jev-like) and
+  [rwkv-jev](https://github.com/XingQiPan/rwkv-jev) (MIT) — the RWKV-Jev prompt
+  format (question catalog + JSON field lead, `noul` natural slot) and the
+  full-word fork readout.
+* [llama.cpp](https://github.com/ggml-org/llama.cpp) (MIT) — inference runtime.
+* HTTP transport adapted from [laya.cpp](https://github.com/lkarlslund/laya.cpp)
+  (MIT).
+
+This is an independent reimplementation. It is **not** Jev and is not affiliated
+with TypeSafe, reflex, SemIf, or the RWKV-Jev projects. Jev, TypeSafe, and other
+names and marks are the property of their respective owners.
+
+## License
+
+MIT.
