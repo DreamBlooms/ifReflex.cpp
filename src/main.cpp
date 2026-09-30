@@ -189,12 +189,16 @@ int main(int argc, char ** argv) {
             }
         }
         // Always no-think: the built-in wrappers suppress reasoning by default
-        // (chatml emits the empty think block). For `native`, inject the empty think
-        // block when the model's template gates reasoning with <think>, so a
-        // template llama.cpp renders faithfully still answers directly.
-        if (fmt.template_kind == ifreflex::template_style::native &&
-            eng.chat_template().find("<think") != std::string::npos) {
-            fmt.no_think_suffix = "<think>\n\n</think>\n\n";
+        // (chatml emits the empty think block). When the model's own template gates
+        // reasoning with <think>, inject the empty think block so the model answers
+        // directly instead of degenerating. `native` uses the ChatML cue; RWKV G1x
+        // uses its canonical cue " <think>\n</think>" (leading space, single newline).
+        if (eng.chat_template().find("<think") != std::string::npos) {
+            if (fmt.template_kind == ifreflex::template_style::native) {
+                fmt.no_think_suffix = "<think>\n\n</think>\n\n";
+            } else if (fmt.template_kind == ifreflex::template_style::rwkv) {
+                fmt.no_think_suffix = " <think>\n</think>";
+            }
         }
         std::cerr << "chat template: " << ifreflex::template_to_string(fmt.template_kind)
                   << (opts.templ == "auto" ? " (auto, from GGUF)" : "") << '\n';
