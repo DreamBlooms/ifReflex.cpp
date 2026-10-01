@@ -73,6 +73,14 @@ struct prompt_format {
     // non-empty value is appended verbatim, which forces a model whose template has
     // a thinking gate to answer directly.
     std::string no_think_suffix;
+    // Permutation orders for the option list. `false` (default) reproduces the
+    // reflex / SemIf layouts exactly: identity first, then distinct shuffles.
+    // `true` rotates a listing sorted by option text (cyclic shifts), so the
+    // prompt set is a function of the option *set* and two listings of the same
+    // options give identical answers at any permutation budget. Turn it on
+    // together with `combine_mode::logmean`, which cancels the residual position
+    // bias those shifts leave behind.
+    bool canonical_order = false;
 };
 
 // Render a state / instructions / criteria value. Strings pass through; structured
@@ -102,11 +110,17 @@ std::vector<branch> build_branches(const prompt_format & fmt,
                                    const json & criteria,
                                    int permutations);
 
-// Deterministic permutation generator: identity first, then up to (permutations-1)
-// distinct shuffles of `keys`, each derived from `seed`. Reproducible across runs
-// and across languages (independent of libc rand()).
+// Deterministic permutation generator. With `canonical` false (default) it
+// reproduces the reflex / SemIf behaviour: identity first, then up to
+// (permutations-1) distinct shuffles derived from `seed` (reproducible across runs
+// and languages, independent of libc rand()). With `canonical` true it returns up to
+// `permutations` cyclic shifts of `keys` sorted by text instead: every option reaches
+// every position once all n shifts are read, and the prompt set is a function of the
+// option *set*, so two listings of the same options give identical answers at any
+// budget.
 std::vector<std::vector<std::string>> distinct_orders(
-    const std::vector<std::string> & keys, int permutations, uint64_t seed);
+    const std::vector<std::string> & keys, int permutations, uint64_t seed,
+    bool canonical = false);
 
 // Stable per-question seed, so one question's orders do not depend on which other
 // questions are in the request (reflex uses random.Random(f"{seed}:{qid}")).

@@ -128,6 +128,48 @@ distinct option orders and averages the per-option probabilities, then
 renormalises. This cuts position bias at N× the branches. Binary questions always
 get the swap as their second order.
 
+Two refinements over that baseline, both opt-in:
+
+* `--combine logmean` averages log-probabilities instead of probabilities. When a
+  branch's position bias is additive in logit space — `logit(option i at position j)
+  = c_i + b_j` — the per-option geometric mean is `c_i` plus a constant, so the
+  position bias cancels **exactly** rather than only reducing. Use it whenever the
+  probability shape matters more than the argmax.
+* `--canonical-order` rotates a listing of the options sorted by their text instead
+  of the caller's. Options attend to one another, so which options sit next to each
+  other otherwise follows the order you happened to type them in. With this the
+  prompt set is a function of the option *set*, so any two listings of the same
+  options return identical probabilities at any permutation budget. Turn it on
+  together with `--combine logmean`; it changes the prompt layout, so it sits outside
+  the parity suite's coverage.
+
+### Label prior
+
+`--prior-strength X` (default `0.75`) divides each question's distribution by the
+running mean of that question's own answers, raised to `X`, and renormalises. The
+model's own answer bias is a prior over the labels; dividing it out is a
+label-free correction worth +1 to +2 accuracy points and a large calibration
+improvement. The prior accumulates per question **and** option set (the same
+question id with different options is a different question), and starts applying
+after `--prior-min-n` answers (default 8). `--prior-strength 0` disables it.
+
+### Fitting a temperature from labels
+
+`--dump-branches F.jsonl` records every scored question's per-order restricted
+logits. Annotate the dump with a `gold` key naming the correct option, then:
+
+```sh
+build/ifreflex-cli --fit-calibration dump.jsonl --fit-out cal.json
+build/ifreflex-cli --model M.gguf --calibration cal.json --input requests.jsonl
+```
+
+`--fit-calibration` minimises the negative log-likelihood of the labelled branches
+over a temperature — a per-question-type multiplier on whatever `--calibration`
+already applies — and reports `nll_before` / `nll_after` so you can see what the
+fit bought. Temperatures do not change the ranking, only the confidence: measure
+them on held-out data before shipping. `--raw` shows the uncalibrated readout if
+you want to see the difference.
+
 ## Build
 
 Requires CMake 3.14+ and a C++20 compiler:
@@ -167,6 +209,12 @@ build/ifreflex-cli --model Qwen3.5-0.8B-Q8_0.gguf --input requests.jsonl
 | `--list-templates` | print llama.cpp's built-in chat template names and exit |
 | `--show-template` | print the GGUF's built-in chat template and exit |
 | `--permutations N` | average over N option orders (1–8, default 2) |
+| `--combine MODE` | merge per-order probabilities: `mean` (default) \| `logmean` |
+| `--canonical-order` | rotate a text-sorted option listing (pair with `--combine logmean`) |
+| `--prior-strength X` | divide by the running answer prior, raised to X (0 disables, default 0.75) |
+| `--prior-min-n N` | answers before the prior applies (default 8) |
+| `--dump-branches F.jsonl` | record per-order restricted logits for an L1 fit |
+| `--fit-calibration D.jsonl --fit-out C.json` | solve the L1 temperature from a labelled dump |
 | `--raw` | print uncalibrated readout probabilities |
 | `--threads N`, `--n-batch N`, `--ctx N`, `--gpu-layers N`, `--device D` | runtime |
 | `--prefix-cache-mib N` | decoded-prefix LRU budget (MiB, default 256; 0 disables) |
@@ -213,6 +261,9 @@ REFLEX_SRC=~/reflex/src SEMIF_SRC=~/SemIf-OpenJev/src RWKV_SRC=~/rwkv-jev-like/s
   [rwkv-jev](https://github.com/XingQiPan/rwkv-jev) (MIT) — the RWKV-Jev prompt
   format (question catalog + JSON field lead, `noul` natural slot) and the
   full-word fork readout.
+* [AnyJev](https://github.com/nokia-applied-research/AnyJev) (Apache-2.0) — the
+  log-mean permutation merge, canonical option listing, batch label prior, and
+  the closed-form L1 temperature fit.
 * [llama.cpp](https://github.com/ggml-org/llama.cpp) (MIT) — inference runtime.
 * HTTP transport adapted from [laya.cpp](https://github.com/lkarlslund/laya.cpp)
   (MIT).

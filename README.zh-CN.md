@@ -112,6 +112,41 @@ Jinja（如 Gemma-4 的 `<|turn>` 宏）会明确报错。
 对各选项概率取平均后重新归一。这能显著降低位置偏差，代价是分支数乘以 N。二元问题的
 第二个顺序固定取交换。
 
+在这一基线之上还有两项改进，均需显式开启：
+
+* `--combine logmean` 取对数概率的平均（几何平均）而非概率的算术平均。当分支的位置
+  偏差在 logit 空间是加性的——即 `logit(选项 i 处于位置 j) = c_i + b_j`——各选项的
+  几何平均等于 `c_i` 加一个常数，位置偏差因此被**精确**抵消，而不只是被削弱。凡是在意
+  概率形状而不只是 argmax 的场景，都建议使用。
+* `--canonical-order` 把选项按文本排序后再做循环位移，而不是沿用调用方给出的顺序。
+  选项之间会互相注意，否则「哪些选项相邻」取决于你恰好以什么顺序传入。开启后提示词
+  集合只取决于选项**集合**，因此同一组选项无论怎么排列，在任意置换预算下都返回完全相同
+  的概率。请与 `--combine logmean` 搭配使用；它会改变提示词版式，因此不在对齐校验的
+  覆盖范围内。
+
+### 标签先验
+
+`--prior-strength X`（默认 `0.75`）把每问的分布除以该问自身答案的运行均值的 `X` 次方，
+再重新归一。模型自身的作答偏好就是标签上的一个先验，把它除掉是一次无需标签的修正，
+通常带来 +1 到 +2 的准确率以及显著的校准改善。先验按「问题 **与** 选项集合」累积
+（同一个问题 id 配上不同的选项，就是另一个问题），并在累计 `--prior-min-n` 个答案后
+开始生效（默认 8）。`--prior-strength 0` 关闭该功能。
+
+### 用标注拟合温度
+
+`--dump-branches F.jsonl` 会记录每个被打分问题在各选项顺序下的受限 logits。给这份转储
+补上一个 `gold` 字段标明正确选项，然后：
+
+```sh
+build/ifreflex-cli --fit-calibration dump.jsonl --fit-out cal.json
+build/ifreflex-cli --model M.gguf --calibration cal.json --input requests.jsonl
+```
+
+`--fit-calibration` 在标注分支上最小化负对数似然来求解温度——它是叠在 `--calibration`
+既有设置之上的一个按问题类型的乘子——并输出 `nll_before` / `nll_after`，让你看清这次
+拟合买到了什么。温度只改变置信度、不改变排序，因此上线前请在留出数据上验证。想看差异
+可以加 `--raw`，输出未经校准的读出。
+
 ## 构建
 
 需要 CMake 3.14+ 与支持 C++20 的编译器：
@@ -149,6 +184,12 @@ build/ifreflex-cli --model Qwen3.5-0.8B-Q8_0.gguf --input requests.jsonl
 | `--list-templates` | 打印 llama.cpp 内置 chat template 名称后退出 |
 | `--show-template` | 打印 GGUF 内置 chat template 后退出 |
 | `--permutations N` | 在 N 种选项顺序上取平均（1–8，默认 2） |
+| `--combine MODE` | 合并各顺序的概率：`mean`（默认）\| `logmean` |
+| `--canonical-order` | 按文本排序后循环位移选项（与 `--combine logmean` 搭配） |
+| `--prior-strength X` | 除以运行答案先验的 X 次方（0 关闭，默认 0.75） |
+| `--prior-min-n N` | 先验生效所需答案数（默认 8） |
+| `--dump-branches F.jsonl` | 记录各顺序受限 logits，用于 L1 拟合 |
+| `--fit-calibration D.jsonl --fit-out C.json` | 从标注转储求解 L1 温度 |
 | `--raw` | 输出未经校准的读出概率 |
 | `--threads N`、`--n-batch N`、`--ctx N`、`--gpu-layers N`、`--device D` | 运行时 |
 | `--prefix-cache-mib N` | 已解码前缀 LRU 预算（MiB，默认 256；0 关闭） |
@@ -188,6 +229,8 @@ REFLEX_SRC=~/reflex/src SEMIF_SRC=~/SemIf-OpenJev/src RWKV_SRC=~/rwkv-jev-like/s
 * [rwkv-jev-like](https://github.com/1cyberlangke1/rwkv-jev-like) 与
   [rwkv-jev](https://github.com/XingQiPan/rwkv-jev)（MIT）——RWKV-Jev 的提示词格式
   （问题目录 + JSON 字段引导、`noul` 自然槽位）与完整词 fork 读出。
+* [AnyJev](https://github.com/nokia-applied-research/AnyJev)（Apache-2.0）——置换合并的
+  几何平均、规范化选项排列、批量标签先验，以及闭式 L1 温度拟合。
 * [llama.cpp](https://github.com/ggml-org/llama.cpp)（MIT）——推理运行时。
 * HTTP 传输层改编自 [laya.cpp](https://github.com/lkarlslund/laya.cpp)（MIT）。
 
