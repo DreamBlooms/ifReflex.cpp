@@ -282,17 +282,42 @@ uint64_t question_seed(int seed, const std::string & qid) {
 }
 
 std::vector<std::vector<std::string>> distinct_orders(
-    const std::vector<std::string> & keys, int permutations, uint64_t seed) {
+    const std::vector<std::string> & keys, int permutations, uint64_t seed,
+    bool canonical) {
     const size_t n = keys.size();
     std::vector<std::vector<std::string>> orders;
     if (n == 0) return orders;
 
-    std::vector<std::string> identity = keys;
-    orders.push_back(identity);
+    // Canonical listing: rotate a listing ordered by option *text* instead of the
+    // caller's. Options attend to one another, so which options sit next to each
+    // other still follows the caller's order under plain shuffles and the readout
+    // is then not a function of the option *set*. Sorting first makes two listings
+    // of the same options produce the same prompts (and so the same answers) at any
+    // permutation budget -- the guarantee AnyJev reports as `canonical_order`.
+    std::vector<std::string> base = keys;
+    if (canonical) {
+        std::stable_sort(base.begin(), base.end());
+    }
+
+    // Cyclic shifts over `base`: every option occupies every position exactly once
+    // once all n are read, and a short prefix of them spreads the options apart,
+    // which averages out position bias much faster than random shuffles do.
+    if (canonical) {
+        const size_t limit = std::min<size_t>(permutations, n);
+        for (size_t s = 0; s < limit; ++s) {
+            std::vector<std::string> rot;
+            rot.reserve(n);
+            for (size_t j = 0; j < n; ++j) rot.push_back(base[(j + s) % n]);
+            orders.push_back(std::move(rot));
+        }
+        return orders;
+    }
+
+    orders.push_back(base);
 
     // Binary questions: the second order is always the swap.
     if (n == 2) {
-        if (permutations > 1) orders.push_back({keys[1], keys[0]});
+        if (permutations > 1) orders.push_back({base[1], base[0]});
         return orders;
     }
 
@@ -316,7 +341,7 @@ std::vector<std::vector<std::string>> distinct_orders(
     size_t tries = 0;
     while (orders.size() < limit && tries < 50 * limit) {
         ++tries;
-        std::vector<std::string> candidate = keys;
+        std::vector<std::string> candidate = base;
         for (size_t i = n - 1; i > 0; --i) {
             const size_t j = size_t(next() % (i + 1));
             std::swap(candidate[i], candidate[j]);
@@ -422,7 +447,7 @@ std::vector<branch> build_branches(const prompt_format & fmt,
     const std::vector<std::vector<std::string>> used_orders =
         fmt.style == prompt_style::semif
             ? std::vector<std::vector<std::string>>{keys}
-            : distinct_orders(keys, perms, seed);
+            : distinct_orders(keys, perms, seed, fmt.canonical_order);
 
     std::vector<branch> out;
     for (const auto & order : used_orders) {
