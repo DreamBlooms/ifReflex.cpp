@@ -54,10 +54,11 @@ struct diffusion_options {
     int permutations = 1; // option-order permutations averaged (reflex position-bias removal).
     double temperature = 1.0; // logit temperature before the restricted softmax.
     // Classifier-free guidance (DiffusionGemma). 0 disables it; a positive value
-    // mixes cond/uncond logits as uncond + (cfg+1)*(cond-uncond), steering the
-    // canvas distribution onto the answer and away from filler. Required for a
-    // usable structured read on a text-backed diffusion model.
-    double cfg_scale = 2.0;
+    // mixes cond/uncond logits as uncond + (cfg+1)*(cond-uncond). With the canvas
+    // region split correctly (prompt causal, canvas bidirectional) it is off by
+    // default: it biases the read toward one label (noul collapses to "yes"), and
+    // the reference djev runs without it. Kept as an opt-in.
+    double cfg_scale = 0.0;
 };
 
 // One question's restricted read: probabilities over `keys` (renormalised),

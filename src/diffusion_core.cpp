@@ -62,11 +62,13 @@ void parse_question(const llama_vocab * vocab, const std::string & qid, const js
 
     if (out.kind == question_kind::noul) {
         out.keys = {"false", "true"};  // djev order: label "no" <-> false, "yes" <-> true
+        // descs align with keys by position: descs[k] describes keys[k]. Position
+        // 0 is "false" (label "no"), so it takes criteria["false"], not ["true"].
         out.descs = {
-            criteria.is_object() && criteria.contains("true") && criteria.at("true").is_string()
-                ? criteria.at("true").get<std::string>() : std::string(),
             criteria.is_object() && criteria.contains("false") && criteria.at("false").is_string()
-                ? criteria.at("false").get<std::string>() : std::string()};
+                ? criteria.at("false").get<std::string>() : std::string(),
+            criteria.is_object() && criteria.contains("true") && criteria.at("true").is_string()
+                ? criteria.at("true").get<std::string>() : std::string()};
     } else if (out.kind == question_kind::choice) {
         if (criteria.is_object()) {
             for (auto it = criteria.begin(); it != criteria.end(); ++it) {
@@ -97,20 +99,21 @@ void parse_question(const llama_vocab * vocab, const std::string & qid, const js
     }
 
     // Project each key onto a single-token canvas label, djev-style: noul uses
-    // the natural words yes/no, score uses 1-based digit strings, and choice
+    // the natural words no/yes, score uses 0-based digit strings, and choice
     // uses letter codes. A text-backed diffusion model places far more mass on
     // natural words / digits than on arbitrary letters, so the label wording
     // matters as much as the readout. Keys stay as the answer keys (noul
     // true/false, score 0-based index) and are unmapped here.
     out.labels = answer_labels(out.kind, out.keys.size(), style);
-    // djev-dev reads letter codes, but a text-backed diffusion model often
-    // outputs the option *name* itself (e.g. " courier") rather than a letter
-    // when the name is a single token. When every option name (" " + key) is a
-    // single token, use those names as the labels so the read matches the
-    // model's natural output; otherwise fall back to the letter codes. This is
-    // what recovers structured reads on short-word options that otherwise
-    // escape to prose (label_mass collapses to ~1e-22 on the letters).
-    if (vocab && style == label_style::djev) {
+    // A text-backed diffusion model often outputs the option *name* itself
+    // (e.g. " courier") for a choice rather than a letter code when the name is
+    // a single token; on letters the restricted readout collapses to noise
+    // (label_mass ~1e-22). For a choice only, when every option name (" " + key)
+    // is a single token, use those names as the labels so the read matches the
+    // model's natural output. noul keeps its djev words (no/yes) and score its
+    // digit strings: applying names there would replace a trained label with an
+    // arbitrary token (noul keys are true/false, not the answer words).
+    if (vocab && style == label_style::djev && out.kind == question_kind::choice) {
         std::vector<std::string> names;
         bool all_single = !out.keys.empty();
         for (const auto & key : out.keys) {

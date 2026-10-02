@@ -44,7 +44,7 @@ struct cli_options {
     bool diffusion = false;
     int diffusion_steps = 1;
     int diffusion_samples = 2;
-    double diffusion_cfg = 2.0;
+    double diffusion_cfg = 0.0;
 
     bool server = false;
     std::string host = "127.0.0.1";
