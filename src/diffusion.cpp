@@ -26,6 +26,7 @@
 #include "ifreflex/diffusion_driver.hpp"
 #include "ifreflex/diffusion_gemma.hpp"
 #include "ifreflex/llada.hpp"
+#include "ifreflex/sys.hpp"
 #include "llama.h"
 
 namespace ifreflex {
@@ -89,7 +90,7 @@ void runtime_load(diffusion_runtime & rt, const diffusion_options & opts) {
     cparams.n_ctx = (uint32_t) want_ctx;
     cparams.n_ubatch = (uint32_t) want_ctx;
     cparams.n_batch = (uint32_t) std::max(opts.n_batch, want_ctx);
-    cparams.n_threads = opts.threads > 0 ? opts.threads : 0;
+    cparams.n_threads = opts.threads > 0 ? opts.threads : physical_core_count();
     cparams.n_threads_batch = cparams.n_threads;
     rt.ctx = llama_init_from_model(rt.model, cparams);
     if (!rt.ctx) throw std::runtime_error("failed to create context");

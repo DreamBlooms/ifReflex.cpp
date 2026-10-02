@@ -43,7 +43,7 @@ struct canvas_question {
 
 struct diffusion_options {
     std::filesystem::path model;
-    int threads = 0;      // 0 uses the llama.cpp default.
+    int threads = 0;      // 0 uses the physical core count (SMT siblings excluded).
     int n_batch = 2048;
     int ctx_size = 0;     // 0 selects from the workload (prompt + canvas).
     int gpu_layers = 0;

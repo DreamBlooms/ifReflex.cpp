@@ -61,6 +61,7 @@ add_executable(ifreflex-cli
     src/llada.cpp
     src/prompt.cpp
     src/readout.cpp
+    src/sys.cpp
     src/protocol.cpp
     src/http.cpp
 )
@@ -92,6 +93,7 @@ add_executable(smoke_diffusion
     src/diffusion_gemma.cpp
     src/llada.cpp
     src/readout.cpp
+    src/sys.cpp
 )
 target_include_directories(smoke_diffusion PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/include"

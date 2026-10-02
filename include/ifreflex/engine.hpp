@@ -29,7 +29,7 @@ std::vector<std::string> llama_builtin_templates();
 
 struct engine_options {
     std::filesystem::path model;
-    int threads = 0;     // 0 uses the llama.cpp default.
+    int threads = 0;     // 0 uses the physical core count (SMT siblings excluded).
     int n_batch = 2048;  // Max tokens decoded in one pass.
     int ctx_size = 0;    // 0 selects a size from the workload.
     int gpu_layers = 0;  // Layers kept in VRAM; 0 is CPU only, negative is all.

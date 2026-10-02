@@ -10,6 +10,7 @@
 #include <stdexcept>
 
 #include "ifreflex/prefix_cache.hpp"
+#include "ifreflex/sys.hpp"
 #include "ggml-backend.h"
 #include "llama.h"
 
@@ -113,7 +114,7 @@ struct engine::impl {
         llama_context_params cparams = llama_context_default_params();
         cparams.n_ctx = (uint32_t) want_ctx;
         cparams.n_batch = (uint32_t) std::min(opts.n_batch, want_ctx);
-        cparams.n_threads = opts.threads > 0 ? opts.threads : 0;
+        cparams.n_threads = opts.threads > 0 ? opts.threads : physical_core_count();
         cparams.n_threads_batch = cparams.n_threads;
         ctx = llama_init_from_model(model, cparams);
         if (!ctx) throw std::runtime_error("failed to create context");
