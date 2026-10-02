@@ -57,7 +57,7 @@ struct diffusion_options {
     // mixes cond/uncond logits as uncond + (cfg+1)*(cond-uncond), steering the
     // canvas distribution onto the answer and away from filler. Required for a
     // usable structured read on a text-backed diffusion model.
-    double cfg_scale = 1.0;
+    double cfg_scale = 2.0;
 };
 
 // One question's restricted read: probabilities over `keys` (renormalised),

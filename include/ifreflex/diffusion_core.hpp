@@ -88,7 +88,6 @@ struct slot_read {
     bool argmax_is_label = true;
 };
 slot_read read_slot(const float * row, const std::vector<int> & label_ids, int n_vocab);
-void set_diag_vocab(const llama_vocab * v);
 
 
 // Merge a question's (permutation x noise) restricted draws into one answer

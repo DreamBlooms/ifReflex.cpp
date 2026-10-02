@@ -14,15 +14,6 @@
 #include "llama.h"
 
 namespace ifreflex {
-namespace {
-const llama_vocab * g_diag_vocab = nullptr;
-std::string tok_piece(int id) {
-    if (!g_diag_vocab) return "#"+std::to_string(id);
-    char buf[64]={0}; int n=llama_token_to_piece(g_diag_vocab,id,buf,63,0,false);
-    return n>0?std::string(buf,n):("#"+std::to_string(id));
-}
-}
-void set_diag_vocab(const llama_vocab * v){ g_diag_vocab=v; }
 
 
 std::vector<llama_token> tokenize_text(const llama_vocab * vocab, const std::string & text,
@@ -293,14 +284,6 @@ slot_read read_slot(const float * row, const std::vector<int> & label_ids, int n
     out.argmax_is_label =
         std::find(label_ids.begin(), label_ids.end(), argmax) != label_ids.end();
 
-    if (std::getenv("IFREFLEX_DIAG")) {
-        std::fprintf(stderr,"[diag] mass=%.3g argmax=%d(%s) is_lab=%d top5=", out.label_mass, argmax, tok_piece(argmax).c_str(), (int)out.argmax_is_label);
-        int top[5]={-1,-1,-1,-1,-1};
-        for(int k=0;k<5;k++){int best=-1;for(int v=0;v<n_vocab;v++){bool used=false;for(int j=0;j<k;j++)if(top[j]==v)used=true;if(!used&&(best<0||row[v]>row[best]))best=v;}top[k]=best;}
-        for(int k=0;k<5;k++) std::fprintf(stderr,"%s:%.2g ", tok_piece(top[k]).c_str(), std::exp((double)row[top[k]]-mx));
-        std::fprintf(stderr," labels="); for(int lid:label_ids) std::fprintf(stderr,"%s ", tok_piece(lid).c_str());
-        std::fprintf(stderr,"\n"); std::fflush(stderr);
-    }
     return out;
 }
 
