@@ -73,6 +73,67 @@ The label depends on the prompt style: a single option letter (`A`, `B`, …), o
 for RWKV-Jev — the full option word. No trained classification head is needed, so
 any stock instruct GGUF works.
 
+## Diffusion LLMs
+
+ifreflex also answers typed decisions on a **block-diffusion** model
+([DiffusionGemma](https://github.com/ggml-org/llama.cpp/pull/24423)), where there
+is no next-token logits at all. A diffusion model denoises a whole **canvas** of
+tokens per forward pass; if the canvas is seeded with an answer template whose
+fixed text is pinned and only the answer slots are left as noise, one denoise step
+gives a distribution over every slot. That distribution *is* the answer.
+
+Serve a DiffusionGemma GGUF with `--diffusion`:
+
+```sh
+build/ifreflex-cli --diffusion --server --port 8080 \
+  --model diffusiongemma-26B-A4B-it-Q4_K_M.gguf \
+  --diffusion-steps 1 --diffusion-samples 3 --permutations 2
+```
+
+`POST /v1/systemone` is unchanged — the same request body works against either
+backend. The readout is a **one-step structured read**: no prose is generated, no
+JSON is parsed, and the answer costs zero generated tokens.
+
+| knob | what it does |
+| --- | --- |
+| `--diffusion-steps N` | denoise steps before the read (1 = the djev one-step read) |
+| `--diffusion-samples N` | independent noise draws averaged per question |
+| `--permutations N` | option-order permutations averaged (removes position bias) |
+
+Questions may be **staged** with `depends_on` / `ask_if`, exactly like
+[djev](https://github.com/mmastrac/djev): questions run in dependency levels, one
+joint canvas read per level, and later levels are conditioned on earlier answers
+via a prefilled `Answers so far` context. A question whose `ask_if` dependency
+falls outside its allowed values is skipped and answered `null`.
+
+```json
+{"state": {"message": "The login page throws 500s for everyone."},
+ "questions": {
+   "route": {"type": "choice", "instructions": "Which team?",
+             "criteria": {"billing": "billing", "technical support": "tech help", "sales": "sales"}},
+   "escalate": {"type": "noul", "instructions": "Escalate?",
+                "depends_on": ["route"], "ask_if": {"route": ["technical support"]}}}}
+```
+
+Every answer also carries a `diagnostics` block: `label_mass` is the fraction of
+the slot's full-vocabulary mass that landed on the declared option codes (a text
+model's natural argmax is often the option *name*, so this is a confidence
+signal, not a correctness one), and `argmax_is_label` reports whether the slot's
+overall argmax was a valid label. Answer probabilities are the softmax over the
+declared labels only, so they always sum to one.
+
+**Decisions never reason here either.** The canvas starts with an empty thought
+block (`<|channel>thought\n<channel|>`), pinned in place, so DiffusionGemma sees
+the thought channel as already open-and-closed and answers directly instead of
+writing a chain of thought first.
+
+This path needs the DiffusionGemma build of llama.cpp (merged here from
+[#24423](https://github.com/ggml-org/llama.cpp/pull/24423)); the stock
+`llama-cli` / `llama-server` cannot drive these models. CPU works (no GPU
+required), but a 26B checkpoint wants ~24 GB of memory to load. Options are
+projected onto single-token letter codes (`A`, `B`, … , `AA`, `AB`, …), so any
+option *name* may be as long as you like.
+
 ## Prompt styles
 
 `--prompt` selects the layout, which is how **reflex / SemIf / RWKV-Jev are

@@ -171,6 +171,48 @@ std::map<std::string, double> merge_branches(
             throw std::invalid_argument("duplicate option key in a branch");
     }
 
+    // Binary (noul) merge in log space with log1p, so a branch probability near 1
+    // keeps an exact small complement instead of rounding to 0/1 (djev-dev
+    // _binary_log_means). Averaging the two conditional log-means and renormalising
+    // is numerically robust where arithmetic-probability averaging is not.
+    if (kind == question_kind::noul && order.size() == 2) {
+        const bool has_true = slot.count("true") != 0;
+        const size_t true_i = has_true ? slot.at("true") : 1; // fall back to 2nd option
+        std::vector<double> log_yes, log_no;
+        for (size_t b = 0; b < keys_per_branch.size(); ++b) {
+            const auto & keys = keys_per_branch[b];
+            const auto & logits = logits_per_branch[b];
+            if (keys.size() != 2 || logits.size() != 2)
+                throw std::invalid_argument("noul branch needs exactly two options");
+            const std::vector<double> probs = softmax(logits, cal.t(kind, logits, state_tokens));
+            double p_true = probs[0];
+            for (size_t i = 0; i < keys.size(); ++i)
+                if (slot.at(keys[i]) == true_i) p_true = probs[i];
+            const double p_false = 1.0 - p_true;
+            // logs of the two conditionals; log1p keeps the small complement.
+            const double lg_t = std::log(std::max(p_true, 1e-300));
+            const double lg_f = std::log(std::max(p_false, 1e-300));
+            log_yes.push_back(lg_t);
+            log_no.push_back(lg_f);
+        }
+        auto log_mean = [](const std::vector<double> & v) {
+            double m = -std::numeric_limits<double>::infinity();
+            for (double x : v) m = std::max(m, x);
+            double s = 0.0;
+            for (double x : v) s += std::exp(x - m);
+            return m + std::log(s) - std::log(double(v.size()));
+        };
+        const double my = log_mean(log_yes), mn = log_mean(log_no);
+        const double peak = std::max(my, mn);
+        const double zy = std::exp(my - peak), zn = std::exp(mn - peak);
+        const double tot = zy + zn;
+        const double p_true = zy / tot;
+        std::map<std::string, double> out;
+        for (size_t i = 0; i < order.size(); ++i)
+            out[order[i]] = (i == true_i) ? p_true : 1.0 - p_true;
+        return out;
+    }
+
     // `mean`: accumulate probabilities. `logmean`: accumulate log-probabilities
     // (a geometric mean), which cancels an additive logit position bias exactly.
     const bool use_log = combine == combine_mode::logmean;

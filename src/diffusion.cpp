@@ -354,7 +354,10 @@ std::vector<canvas_result> diffusion_engine::score_canvas(
     }
 
     auto template_ids = [&](const std::vector<std::string> & labels) {
-        std::string text;
+        // Head scaffold: the empty thought block (djev SCAFFOLD_TEXT). Pinning it
+        // at the top of the canvas tells DiffusionGemma the thought channel is
+        // already open-and-closed, so it answers directly instead of reasoning.
+        std::string text = "<|channel>thought\n<channel|>";
         for (size_t i = 0; i < nq; ++i) {
             text += questions[i].qid;
             text += ": ";

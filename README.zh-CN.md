@@ -66,6 +66,56 @@ token 精确索引），因此重复出现的 state 可跳过 prefill；state �
 标签的形式取决于提示词风格：单个选项字母（`A`、`B`……），或——在 RWKV-Jev 下——完整的
 选项词。因为不需要训练分类头，任何通用 instruct GGUF 都能直接使用。
 
+## 扩散模型（Diffusion LLM）
+
+ifreflex 还能在**块扩散**（block-diffusion）模型（[DiffusionGemma](https://github.com/ggml-org/llama.cpp/pull/24423)）
+上回答类型化决策——这类模型根本没有"下一个 token 的 logits"。扩散模型每一步前向去噪
+整块**画布**（canvas）token；若画布用一份答案模板填充，固定文本全部钉死（pin），只留答案
+槽位为噪声，那么一步去噪就能得到每个槽位的分布。这个分布**就是**答案。
+
+用 `--diffusion` 启动 DiffusionGemma GGUF：
+
+```sh
+build/ifreflex-cli --diffusion --server --port 8080 \
+  --model diffusiongemma-26B-A4B-it-Q4_K_M.gguf \
+  --diffusion-steps 1 --diffusion-samples 3 --permutations 2
+```
+
+`POST /v1/systemone` 契约不变——同一请求体对两种后端通用。读出是**单步结构化读**：
+不生成任何散文、不解析 JSON，答案代价为零生成 token。
+
+| 参数 | 作用 |
+| --- | --- |
+| `--diffusion-steps N` | 读出前的去噪步数（1 = djev 的单步读） |
+| `--diffusion-samples N` | 每题平均的独立噪声采样次数 |
+| `--permutations N` | 平均的选项顺序置换数（消除位置偏差） |
+
+问题可用 `depends_on` / `ask_if` **分阶段**编排，与 [djev](https://github.com/mmastrac/djev)
+一致：问题按依赖层级执行，每层一次联合画布读，后续层通过预填充的 `Answers so far` 上下文
+以前序答案为条件。`ask_if` 依赖值不在允许集合内的问题会被跳过并返回 `null`。
+
+```json
+{"state": {"message": "登录页对所有人返回 500。"},
+ "questions": {
+   "route": {"type": "choice", "instructions": "哪个团队处理？",
+             "criteria": {"billing": "账单", "technical support": "技术支持", "sales": "销售"}},
+   "escalate": {"type": "noul", "instructions": "是否升级？",
+                "depends_on": ["route"], "ask_if": {"route": ["technical support"]}}}}
+```
+
+每个答案还带一个 `diagnostics` 块：`label_mass` 是槽位全词表分布中落在声明选项码上的
+质量占比（文本模型的天然 argmax 往往是选项*名*本身，所以这是置信度信号，不是正确性信号）；
+`argmax_is_label` 报告槽位的整体 argmax 是否为合法标签。答案概率只在声明标签上做 softmax，
+因此永远和为 1。
+
+**这条路径同样不做推理。** 画布以一个空思考块（`<|channel>thought\n<channel|>`）开头并
+钉死，DiffusionGemma 会认为思考通道已开又关，于是直接作答，而不是先写思维链。
+
+此路径需要 llama.cpp 的 DiffusionGemma 构建（由 [#24423](https://github.com/ggml-org/llama.cpp/pull/24423)
+合入）；原生 `llama-cli` / `llama-server` 无法驱动这类模型。CPU 可用（无需 GPU），
+但 26B 权重约需 24 GB 内存才能加载。选项被投影到单 token 字母码（`A`、`B`……、`AA`、`AB`……），
+因此选项*名*可以任意长。
+
 ## 提示词风格
 
 `--prompt` 选择渲染版式，也是 **reflex / SemIf / RWKV-Jev 的切换开关**：
