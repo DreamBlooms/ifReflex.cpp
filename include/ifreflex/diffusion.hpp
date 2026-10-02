@@ -34,6 +34,11 @@ struct canvas_question {
     std::vector<std::string> keys;
     std::vector<std::string> labels; // token text for each key (defaults to keys)
     json legend;
+    // Staged scheduling (djev): answered after these question ids, and only when
+    // each ask_if dependency's answer is among its allowed values.
+    std::vector<std::string> depends_on;
+    std::map<std::string, std::vector<std::string>> ask_if;
+    bool alone = false; // read in its own canvas
 };
 
 struct diffusion_options {
@@ -79,8 +84,10 @@ public:
     // position that is not an answer slot, run `options.steps` denoise steps over
     // `options.samples` noise draws, and read each slot's distribution restricted
     // to that question's label tokens. Returns one result per question, in order.
+    // `prior_context` is prepended to the prompt (earlier answers, for staged reads).
     std::vector<canvas_result> score_canvas(const std::string & state_text,
-                                            const std::vector<canvas_question> & questions);
+                                            const std::vector<canvas_question> & questions,
+                                            const std::string & prior_context = std::string());
 
     // Full Jev /v1/systemone contract: parse {state, questions} -> answer JSON.
     // This is the predictor-shaped entry used by the HTTP server.

@@ -197,6 +197,67 @@ static void parse_question(const std::string & qid, const json & q, canvas_quest
 
     // Project each key onto a distinct single-token code.
     out.labels = label_codes(out.keys.size());
+
+    // Staged scheduling fields (djev depends_on / ask_if / alone).
+    if (q.contains("depends_on") && q.at("depends_on").is_array())
+        for (const auto & d : q.at("depends_on"))
+            out.depends_on.push_back(d.get<std::string>());
+    if (q.contains("ask_if") && q.at("ask_if").is_object()) {
+        for (auto it = q.at("ask_if").begin(); it != q.at("ask_if").end(); ++it) {
+            std::vector<std::string> vals;
+            if (it.value().is_array())
+                for (const auto & v : it.value()) vals.push_back(v.get<std::string>());
+            else if (it.value().is_string())
+                vals.push_back(it.value().get<std::string>());
+            out.ask_if[it.key()] = vals;
+        }
+    }
+    out.alone = q.value("alone", false);
+}
+
+// Topological levels by depends_on (djev schedule): questions in one level are
+// read jointly; a level runs after every level its members depend on. Declaration
+// order is kept within a level. Throws on a dependency cycle.
+static std::vector<std::vector<int>> schedule(const std::vector<canvas_question> & qs) {
+    const size_t n = qs.size();
+    std::map<std::string, int> id_of;
+    for (size_t i = 0; i < n; ++i) id_of[qs[i].qid] = (int) i;
+    std::vector<int> done(n, 0);
+    std::vector<std::vector<int>> levels;
+    size_t remaining = n;
+    while (remaining > 0) {
+        std::vector<int> level;
+        for (size_t i = 0; i < n; ++i) {
+            if (done[i]) continue;
+            bool ready = true;
+            for (const auto & dep : qs[i].depends_on) {
+                auto it = id_of.find(dep);
+                if (it != id_of.end() && !done[(size_t) it->second]) { ready = false; break; }
+            }
+            if (ready) level.push_back((int) i);
+        }
+        if (level.empty())
+            throw std::invalid_argument("schema: dependency cycle among questions");
+        for (int i : level) { done[(size_t) i] = 1; --remaining; }
+        levels.push_back(std::move(level));
+    }
+    return levels;
+}
+
+// The answer as the name ask_if compares against: yes/no, an option key, or a level index.
+static std::string answer_name(const canvas_question & q, const json & ans) {
+    if (ans.is_null()) return "";
+    if (q.kind == question_kind::noul) return ans.value("noul", 0.0) >= 0.5 ? "true" : "false";
+    if (q.kind == question_kind::choice) return ans.value("choice", std::string());
+    // score: numeric key of the rounded expected level
+    return std::to_string((int) std::llround(ans.value("score", 0.0)));
+}
+
+// Index of a question by qid, or -1.
+static int qid_index(const std::vector<canvas_question> & qs, const std::string & qid) {
+    for (size_t i = 0; i < qs.size(); ++i)
+        if (qs[i].qid == qid) return (int) i;
+    return -1;
 }
 
 json diffusion_engine::predict(const json & request) {
@@ -220,26 +281,60 @@ json diffusion_engine::predict(const json & request) {
     }
 
     const std::string state_text = state_to_text(state);
-    const std::vector<canvas_result> results = score_canvas(state_text, qs);
 
+    // Staged execution (djev decide): one joint read per dependency level,
+    // later levels conditioned on earlier answers. ask_if gates a question to a
+    // null answer when its dependency's answer is not in the allowed set.
+    const std::vector<std::vector<int>> levels = schedule(qs);
     json answers = json::object();
     json diagnostics = json::object();
-    for (const auto & r : results) {
-        std::map<std::string, double> key_probs;
-        for (size_t i = 0; i < r.keys.size(); ++i) key_probs[r.keys[i]] = r.probabilities[i];
-        answers[r.qid] = to_answer(r.kind, key_probs, r.legend);
-        diagnostics[r.qid] = {{"label_mass", r.label_mass},
-                              {"argmax_is_label", r.argmax_is_label}};
+    std::map<std::string, json> answered;
+    std::string prior_context;
+    int prompt_tokens_total = 0;
+
+    for (const auto & level : levels) {
+        // Filter out questions gated off by ask_if at this point.
+        std::vector<int> asked;
+        for (int idx : level) {
+            const canvas_question & q = qs[(size_t) idx];
+            bool gate_ok = true;
+            for (const auto & [dep, vals] : q.ask_if) {
+                const std::string got = answer_name(
+                    qs[(size_t) qid_index(qs, dep)], answered.count(dep) ? answered.at(dep) : json());
+                if (std::find(vals.begin(), vals.end(), got) == vals.end()) { gate_ok = false; break; }
+            }
+            if (gate_ok) asked.push_back(idx);
+            else answers[q.qid] = nullptr;
+        }
+        if (asked.empty()) continue;
+
+        std::vector<canvas_question> group;
+        for (int idx : asked) group.push_back(qs[(size_t) idx]);
+
+        const std::vector<canvas_result> results = score_canvas(state_text, group, prior_context);
+        for (const auto & r : results) {
+            std::map<std::string, double> key_probs;
+            for (size_t i = 0; i < r.keys.size(); ++i) key_probs[r.keys[i]] = r.probabilities[i];
+            const json a = to_answer(r.kind, key_probs, r.legend);
+            answers[r.qid] = a;
+            answered[r.qid] = a;
+            diagnostics[r.qid] = {{"label_mass", r.label_mass},
+                                  {"argmax_is_label", r.argmax_is_label}};
+            prompt_tokens_total = r.prompt_tokens;
+            // Condition later stages on this answer (djev "Answers so far").
+            prior_context += r.qid + ": " + answer_name(qs[(size_t) qid_index(qs, r.qid)], a) + "\n";
+        }
     }
 
-    const json usage = {{"input_tokens", results.empty() ? 0 : results.front().prompt_tokens},
-                        {"state_tokens", results.empty() ? 0 : results.front().prompt_tokens}};
+    const json usage = {{"input_tokens", prompt_tokens_total},
+                        {"state_tokens", prompt_tokens_total}};
     return {{"model", p->name}, {"answers", answers}, {"diagnostics", diagnostics}, {"usage", usage}};
 }
 
 std::vector<canvas_result> diffusion_engine::score_canvas(
     const std::string & state_text,
-    const std::vector<canvas_question> & questions) {
+    const std::vector<canvas_question> & questions,
+    const std::string & prior_context) {
 
     if (questions.empty()) return {};
     const int n_vocab = p->n_vocab;
@@ -354,6 +449,10 @@ std::vector<canvas_result> diffusion_engine::score_canvas(
     }
     prompt_text += "State:\n";
     prompt_text += state_text;
+    if (!prior_context.empty()) {
+        prompt_text += "\nAnswers so far:\n";
+        prompt_text += prior_context;
+    }
     prompt_text += "\nAnswers:\n";
     const std::vector<llama_token> prompt_tokens =
         tokenize_text(p->vocab, prompt_text, /*add_special=*/false, /*parse_special=*/true);
