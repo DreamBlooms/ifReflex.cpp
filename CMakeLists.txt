@@ -14,6 +14,17 @@ if(NOT EXISTS "${LLAMA_DIR}/CMakeLists.txt")
         "llama.cpp not found at ${LLAMA_DIR}. Run: git submodule update --init --depth 1")
 endif()
 
+# The pinned submodule is upstream v0.5.0; the diffusion build is that base plus
+# the patches in third_party/patches (DiffusionGemma PR #24423 + ifreflex's
+# canvas split). Apply them at configure time so a fresh checkout builds without
+# a manual step. The script is safe to rerun.
+execute_process(
+    COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/apply_patches.sh" "${LLAMA_DIR}"
+    RESULT_VARIABLE PATCH_RESULT)
+if(NOT PATCH_RESULT EQUAL 0)
+    message(FATAL_ERROR "scripts/apply_patches.sh failed (${PATCH_RESULT})")
+endif()
+
 set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)

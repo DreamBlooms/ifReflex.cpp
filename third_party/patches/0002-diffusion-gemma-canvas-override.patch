@@ -1,0 +1,79 @@
+From: DreamBlooms <DreamBlooms@users.noreply.github.com>
+Subject: [PATCH 2/2] diffusion-gemma: per-request canvas region override
+
+The unified [prompt | canvas] forward splits the regions at the model's baked
+canvas_length, but djev serves a narrower canvas per request (canvas_width).
+Without an override a short request lands P at 0 and the whole prompt is
+decoded as canvas (decoder embedding, decoder per-layer scalar, bidirectional
+attention). Add llama_diffusion_set_canvas to set the split for the next
+decode; 0 restores the baked value.
+
+Base: v0.5.0 + patch 1/2.
+
+---
+diff --git a/include/llama.h b/include/llama.h
+index 5df110854..48d079225 100644
+--- a/include/llama.h
++++ b/include/llama.h
+@@ -598,6 +598,13 @@ extern "C" {
+                          float   temp_inv,
+                           bool   enabled);
+ 
++    // DiffusionGemma canvas override for the next llama_decode: split [prompt | canvas] at this many canvas
++    // positions instead of the model's baked canvas_length. 0 restores the baked value. Lets a caller serve a
++    // narrower per-request canvas (djev canvas_width). No-op for other models.
++    LLAMA_API void llama_diffusion_set_canvas(
++            struct llama_model * model,
++                       int32_t   canvas_length);
++
+     // DiffusionGemma device-resident self-conditioning: when enabled, the SC input is read from a persistent
+     // device buffer (written in-graph from the previous step's logits) instead of a per-step host upload. The
+     // SC math is unchanged/bit-identical; single-device only. No-op for other models. Caller restores false.
+diff --git a/src/models/diffusion-gemma.cpp b/src/models/diffusion-gemma.cpp
+index d89cd71d0..8f34250cb 100644
+--- a/src/models/diffusion-gemma.cpp
++++ b/src/models/diffusion-gemma.cpp
+@@ -347,7 +347,8 @@ llama_model_diffusion_gemma::graph::graph(const llama_model & model, const llm_g
+     const bool is_prefill = (phase == llama_model_diffusion_gemma::PKV_PREFILL);
+     const bool is_decode  = (phase == llama_model_diffusion_gemma::PKV_DECODE);
+ 
+-    const int64_t canvas_length = dmodel.canvas_length;
++    const int64_t canvas_length = dmodel.canvas_length_override > 0 ? dmodel.canvas_length_override
++                                                                    : dmodel.canvas_length;
+     // Region split P|C. UNIFIED: prompt = first (n_tokens - canvas_length), canvas = last canvas_length
+     // (P=0 for tiny warmup graphs). PREFILL: all prompt. DECODE: all canvas, P = cached prompt length.
+     int64_t P, C;
+@@ -642,6 +643,17 @@ void llama_diffusion_set_sc(struct llama_model * model, const float * sc_logits,
+     dm->sc_enabled    = enabled;
+ }
+ 
++// Public API: override the canvas region size for the next llama_decode (no-op on other models). The
++// graph splits [prompt | canvas] at this width instead of the baked canvas_length; 0 restores the baked
++// value. Lets a caller serve the same model with a per-request canvas (djev's canvas_width).
++void llama_diffusion_set_canvas(struct llama_model * model, int32_t canvas_length) {
++    auto * dm = dynamic_cast<llama_model_diffusion_gemma *>(model);
++    if (!dm) {
++        return;
++    }
++    dm->canvas_length_override = canvas_length > 0 ? (uint32_t) canvas_length : 0;
++}
++
+ // Public API: opt into device-resident self-conditioning (no-op on other models). See llama.h.
+ void llama_diffusion_set_device_sc(struct llama_model * model, bool enabled) {
+     auto * dm = dynamic_cast<llama_model_diffusion_gemma *>(model);
+diff --git a/src/models/models.h b/src/models/models.h
+index c7b20b851..3ffa245db 100644
+--- a/src/models/models.h
++++ b/src/models/models.h
+@@ -890,6 +890,11 @@ struct llama_model_diffusion_gemma : public llama_model_base {
+     // canvas occupies the last canvas_length positions of the batch; everything before is the prompt
+     uint32_t canvas_length = 0;
+ 
++    // per-request canvas override (set via llama_diffusion_set_canvas before llama_decode). The GGUF bakes
++    // an upper bound (256), but a request may use a narrower canvas: djev serves one canvas_width per
++    // request. 0 = use the baked canvas_length.
++    mutable uint32_t canvas_length_override = 0;
++
+     // self-conditioning per-request state (set via llama_diffusion_set_sc before llama_decode). sc_enabled
+     // false = byte-identical to zero-SC; sc_use is a {0,1} gate (a block's first step uses 0); sc_logits_ptr
+     // is [n_vocab * C] host logits, the graph applies softmax(sc_logits * sc_temp_inv).

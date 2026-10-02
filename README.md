@@ -270,7 +270,12 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j8
 ```
 
-llama.cpp is pinned to release `v0.4.1` under `third_party/llama.cpp`;
+llama.cpp is pinned to release `v0.5.0` under `third_party/llama.cpp`. The
+diffusion build is that base plus the patches in `third_party/patches`
+(DiffusionGemma, upstream
+[#24423](https://github.com/ggml-org/llama.cpp/pull/24423), and a per-request
+canvas split); `scripts/apply_patches.sh` applies them and runs automatically at
+CMake configure time, so a submodule at the pinned tag is enough.
 `-DLLAMA_DIR=...` points the build at another checkout. `nlohmann/json` and
 `cpp-httplib` are vendored under `third_party/`, so the build stays
 self-contained and cross-compilable.

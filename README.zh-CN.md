@@ -240,9 +240,12 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j8
 ```
 
-llama.cpp 以子模块形式固定在 `v0.4.1` 发行版，位于 `third_party/llama.cpp`；
-`-DLLAMA_DIR=...` 可指定其他 checkout。`nlohmann/json` 与 `cpp-httplib` 已置于
-`third_party/`，因此构建完全自包含，且便于交叉编译。
+llama.cpp 以子模块形式固定在 `v0.5.0` 发行版，位于 `third_party/llama.cpp`。扩散构建
+在此基础上叠加 `third_party/patches` 中的补丁（DiffusionGemma，即上游
+[#24423](https://github.com/ggml-org/llama.cpp/pull/24423)，以及每请求画布切分）；
+`scripts/apply_patches.sh` 负责应用，并在 CMake 配置阶段自动执行，因此子模块停留在
+固定 tag 即可。`-DLLAMA_DIR=...` 可指定其他 checkout。`nlohmann/json` 与
+`cpp-httplib` 已置于 `third_party/`，因此构建完全自包含，且便于交叉编译。
 
 ### GPU
 

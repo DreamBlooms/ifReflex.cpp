@@ -21,6 +21,9 @@ if [ ! -f "$ROOT/third_party/llama.cpp/CMakeLists.txt" ]; then
     git -C "$ROOT" submodule update --init --depth 1
 fi
 
+echo "==> applying llama.cpp patches"
+"$ROOT/scripts/apply_patches.sh" "$ROOT/third_party/llama.cpp"
+
 echo "==> configuring ($BUILD)"
 cmake -S "$ROOT" -B "$BUILD" \
     -DCMAKE_BUILD_TYPE=Release \
