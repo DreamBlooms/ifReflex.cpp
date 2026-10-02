@@ -189,12 +189,12 @@ const std::vector<std::string> & question_labels(const canvas_question & q) {
 std::string build_template_text(const std::string & head,
                                 const std::vector<canvas_question> & questions,
                                 const std::vector<std::string> & labels) {
-    // djev-dev encode_answer: scaffold + "index:label" rows joined by newlines,
-    // matching the prompt's "id:label" reply format (id is the question index).
+    // djev-dev encode_answer: scaffold + "index: label" rows joined by newlines,
+    // with the same ": " separator as the prompt's reply format.
     std::string text = head;
     for (size_t i = 0; i < questions.size(); ++i) {
         text += std::to_string(i);
-        text += ":";
+        text += ": ";
         text += labels[i];
         text += "\n";
     }

@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <random>
 #include <stdexcept>
 
@@ -37,7 +39,11 @@ std::string diffusion_backend::build_prompt(const diffusion_runtime & /*rt*/,
         prompt_text += "\nAnswers so far:\n";
         prompt_text += prior_context;
     }
-    prompt_text += "\nReply with one line per question, in order: \"id:label\". Do not add explanations.\nAnswers:\n";
+    // djev-dev / mmastrac reply format is "id: label" (separator ": "); the
+    // canvas template must use the same separator so the slot is read in the
+    // format the model was told to produce.
+    prompt_text += "\nReply with one line per question, in order, formatted as \"id: label\". "
+                   "Do not add explanations.\nAnswers:\n";
     return prompt_text;
 }
 
@@ -68,27 +74,50 @@ std::vector<canvas_result> run_canvas(diffusion_runtime & rt,
     const int width = (int) base.size();
 
     // ---- 2. Prompt: schema + state, rendered by the arch backend. ----
+    // Option lines follow djev-dev exactly per kind: noul and score show only the
+    // description (the label already names the pole/level), choice shows
+    // "label: name - description". Rendering "label: key - desc" unconditionally
+    // duplicated the key for choice and score (e.g. "courier: courier - ...",
+    // "0: 0 - ...") and prepended a spurious "false"/"0" to noul/score.
     std::string instructions;
     for (size_t i = 0; i < nq; ++i) {
+        const canvas_question & q = questions[i];
+        const std::vector<std::string> & labs = question_labels(q);
         instructions += "\nQuestion ";
         instructions += std::to_string(i);
         instructions += ": ";
-        instructions += questions[i].instructions;
+        instructions += q.instructions;
         instructions += '\n';
-        const std::vector<std::string> & labs = question_labels(questions[i]);
         for (size_t k = 0; k < labs.size(); ++k) {
+            const std::string desc =
+                (k < q.descs.size() && !q.descs[k].empty()) ? q.descs[k] : std::string();
             instructions += "  ";
             instructions += labs[k];
             instructions += ": ";
-            instructions += questions[i].keys[k];
-            if (k < questions[i].descs.size() && !questions[i].descs[k].empty()) {
-                instructions += " - ";
-                instructions += questions[i].descs[k];
+            if (q.kind == question_kind::choice) {
+                instructions += q.keys[k];
+                if (!desc.empty()) { instructions += " - "; instructions += desc; }
+            } else {
+                // noul / score: label names the pole or level, so only the
+                // description follows.
+                instructions += desc.empty() ? labs[k] : desc;
             }
             instructions += '\n';
         }
     }
     const std::string prompt_text = backend.build_prompt(rt, instructions, state_text, prior_context);
+    if (std::getenv("IFREFLEX_DUMP_PROMPT")) {
+        // Sanitize: mask any <...> special marker so no control token reaches the
+        // terminal (the raw turn/channel markers would break the log).
+        std::string s = prompt_text;
+        for (size_t p = 0; (p = s.find('<', p)) != std::string::npos; ) {
+            const size_t q = s.find('>', p);
+            if (q == std::string::npos) break;
+            s.replace(p, q - p + 1, "[TOK]");
+            p += 5;
+        }
+        std::fprintf(stderr, "[prompt] %s\n[/prompt]\n", s.c_str());
+    }
     const std::vector<llama_token> prompt_tokens =
         tokenize_text(rt.vocab, prompt_text, /*add_special=*/false, /*parse_special=*/true);
     const int n_input = (int) prompt_tokens.size();
