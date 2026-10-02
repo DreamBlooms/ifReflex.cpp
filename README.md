@@ -16,6 +16,16 @@ One binary covers four systems: [reflex](https://github.com/kshetrajna12/reflex)
 instruct GGUF. It speaks the same `POST /v1/systemone` contract as TypeSafe's Jev,
 so a client written for Jev points at a local server unchanged.
 
+Pre-converted GGUFs for the autoregressive backends:
+
+| model | GGUF |
+| --- | --- |
+| Qwen3.5 0.8B | [unsloth/Qwen3.5-0.8B-GGUF](https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF) |
+| Qwen3.5 2B | [unsloth/Qwen3.5-2B-GGUF](https://huggingface.co/unsloth/Qwen3.5-2B-GGUF) |
+| Qwen3.5 4B | [unsloth/Qwen3.5-4B-GGUF](https://huggingface.co/unsloth/Qwen3.5-4B-GGUF) |
+| Qwen3.6-35B-A3B | [unsloth/Qwen3.6-35B-A3B-GGUF](https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF) |
+| Qwen3.8 27B | [unsloth/Qwen3.8-27B-GGUF](https://huggingface.co/unsloth/Qwen3.8-27B-GGUF) |
+
 ## One message, several decisions
 
 Serve the model:
@@ -86,8 +96,8 @@ from the GGUF at load — no flag selects it.
 
 | arch | model | how a slot is read |
 | --- | --- | --- |
-| `diffusion-gemma` | [DiffusionGemma](https://github.com/ggml-org/llama.cpp/pull/24423) | fixed-length canvas, non-answer text pinned, self-conditioning + prompt-KV phases |
-| `llada-moe` | [LLaDA-MoE](https://huggingface.co/inclusionAI/LLaDA-MoE-7B-A1B-Instruct) | mask-token seeding, one non-causal forward over prompt + answer rows |
+| `diffusion-gemma` | [DiffusionGemma](https://huggingface.co/unsloth/diffusiongemma-26B-A4B-it-GGUF) | fixed-length canvas, non-answer text pinned, self-conditioning + prompt-KV phases |
+| `llada-moe` | [LLaDA-MoE](https://huggingface.co/mradermacher/LLaDA-MoE-7B-A1B-Instruct-GGUF) | mask-token seeding, one non-causal forward over prompt + answer rows |
 
 Serve a diffusion GGUF with `--diffusion`:
 

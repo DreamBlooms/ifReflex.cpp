@@ -15,6 +15,16 @@
 instruct GGUF。协议与 TypeSafe 的 Jev 完全一致，都是 `POST /v1/systemone`，因此为 Jev
 编写的客户端可以原样指向本地服务。
 
+自回归后端的预转换 GGUF：
+
+| 模型 | GGUF |
+| --- | --- |
+| Qwen3.5 0.8B | [unsloth/Qwen3.5-0.8B-GGUF](https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF) |
+| Qwen3.5 2B | [unsloth/Qwen3.5-2B-GGUF](https://huggingface.co/unsloth/Qwen3.5-2B-GGUF) |
+| Qwen3.5 4B | [unsloth/Qwen3.5-4B-GGUF](https://huggingface.co/unsloth/Qwen3.5-4B-GGUF) |
+| Qwen3.6-35B-A3B | [unsloth/Qwen3.6-35B-A3B-GGUF](https://huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF) |
+| Qwen3.8 27B | [unsloth/Qwen3.8-27B-GGUF](https://huggingface.co/unsloth/Qwen3.8-27B-GGUF) |
+
 ## 一条消息，多个决策
 
 启动服务：
@@ -77,8 +87,8 @@ token 精确索引），因此重复出现的 state 可跳过 prefill；state �
 
 | 架构 | 模型 | 槽位读出方式 |
 | --- | --- | --- |
-| `diffusion-gemma` | [DiffusionGemma](https://github.com/ggml-org/llama.cpp/pull/24423) | 固定长度画布，非答案文本全部钉死，自条件 + prompt-KV 相位 |
-| `llada-moe` | [LLaDA-MoE](https://huggingface.co/inclusionAI/LLaDA-MoE-7B-A1B-Instruct) | mask token 播种，对提示与答案行做一次非因果前向 |
+| `diffusion-gemma` | [DiffusionGemma](https://huggingface.co/unsloth/diffusiongemma-26B-A4B-it-GGUF) | 固定长度画布，非答案文本全部钉死，自条件 + prompt-KV 相位 |
+| `llada-moe` | [LLaDA-MoE](https://huggingface.co/mradermacher/LLaDA-MoE-7B-A1B-Instruct-GGUF) | mask token 播种，对提示与答案行做一次非因果前向 |
 
 启动时指定 `--diffusion`，并将模型换为对应架构的 GGUF：
 
