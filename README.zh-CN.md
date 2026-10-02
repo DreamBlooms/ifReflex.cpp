@@ -82,8 +82,8 @@ build/ifreflex-cli --diffusion --server --port 8080 \
   --diffusion-steps 1 --diffusion-samples 3 --permutations 2
 ```
 
-接口契约不变，`POST /v1/systemone` 的请求体对两种后端通用。读出为**单步结构化读**：
-不生成散文、不解析 JSON，答案的生成代价为零个 token。三个参数用于在稳定性与精度之间权衡：
+接口约定不变，`POST /v1/systemone` 的请求体对两种后端通用。读出为**单步结构化读**：
+不生成文本、不解析 JSON，因此不产生任何生成 token。三个参数用于在稳定性与精度之间权衡：
 
 | 参数 | 作用 |
 | --- | --- |
@@ -105,7 +105,7 @@ build/ifreflex-cli --diffusion --server --port 8080 \
 ```
 
 每个答案附带一个 `diagnostics` 块。`label_mass` 表示槽位全词表分布中落在所声明选项码上的
-概率质量占比；由于文本模型的天然 argmax 常为选项*名*本身，该值反映的是置信程度，而非正确性。
+概率质量占比；由于文本模型的天然 argmax 常为选项*名*本身，该值反映的是置信度，而非正确性。
 `argmax_is_label` 报告槽位的整体 argmax 是否为合法标签。答案概率仅在所声明标签上做 softmax，
 因此恒满足归一化。
 
@@ -115,7 +115,7 @@ build/ifreflex-cli --diffusion --server --port 8080 \
 该路径依赖 llama.cpp 的 DiffusionGemma 构建（由 [#24423](https://github.com/ggml-org/llama.cpp/pull/24423)
 合入）；原生 `llama-cli` / `llama-server` 尚不支持此类模型。CPU 即可运行，无需 GPU，
 但加载 26B 权重约需 24 GB 内存。选项名被映射为单 token 字母码（`A`、`B`……、`AA`、`AB`……），
-故选项*名*的长度不受限制。
+因此选项名本身可以任意长。
 
 ## 提示词风格
 
