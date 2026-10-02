@@ -155,7 +155,14 @@ build/ifreflex-cli --model M.gguf --calibration cal.json --input requests.jsonl
 
 ## 构建
 
-需要 CMake 3.14+ 与支持 C++20 的编译器：
+需要 CMake 3.14+ 与支持 C++20 的编译器。`scripts/build.sh` 会完成配置与构建（额外参数会
+转交给 CMake，例如指定 GPU 后端）：
+
+```sh
+scripts/build.sh
+```
+
+手动构建：
 
 ```sh
 git submodule update --init --depth 1
@@ -167,11 +174,25 @@ llama.cpp 以子模块形式固定在 `v0.4.1` 发行版，位于 `third_party/l
 `-DLLAMA_DIR=...` 可指定其他 checkout。`nlohmann/json` 与 `cpp-httplib` 已置于
 `third_party/`，因此构建完全自包含，且便于交叉编译。
 
-默认只编译 CPU 后端。CUDA、Vulkan、ROCm（HIP）与 Metal 均为可选后端，在配置阶段开启：
+### GPU
+
+默认构建仅支持 CPU。CUDA、Vulkan、ROCm（HIP）与 Metal 为可选后端，在配置阶段启用其一：
 
 ```sh
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DIFREFLEX_CUDA=ON
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DIFREFLEX_CUDA=ON     # NVIDIA
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DIFREFLEX_VULKAN=ON   # AMD 或 Intel
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DIFREFLEX_HIP=ON      # AMD ROCm
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DIFREFLEX_METAL=ON    # Apple
+cmake --build build -j --target ifreflex-cli
 ```
+
+各后端需要对应的工具链：CUDA Toolkit、Vulkan SDK（`glslc` 与 loader）、ROCm，或 Xcode
+命令行工具。交叉编译时，可用 `-DCMAKE_CUDA_ARCHITECTURES=89`（CUDA）或
+`-DGPU_TARGETS=gfx1100`（HIP）指定目标 GPU。
+
+运行时通过 `--gpu-layers -1`（全部层）或指定层数卸载到 GPU，并通过 `--device CUDA0`
+或逗号分隔的设备列表选择设备；`--list-devices` 会列出当前构建可用的设备。纯 CPU 构建会
+忽略 `--gpu-layers`，因此同一条命令在各类构建下均可使用。
 
 运行 CLI：
 

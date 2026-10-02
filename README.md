@@ -172,7 +172,14 @@ you want to see the difference.
 
 ## Build
 
-Requires CMake 3.14+ and a C++20 compiler:
+Requires CMake 3.14+ and a C++20 compiler. `scripts/build.sh` configures and
+builds the CLI (extra CMake arguments are forwarded, e.g. a GPU backend):
+
+```sh
+scripts/build.sh
+```
+
+Manual build:
 
 ```sh
 git submodule update --init --depth 1
@@ -185,12 +192,28 @@ llama.cpp is pinned to release `v0.4.1` under `third_party/llama.cpp`;
 `cpp-httplib` are vendored under `third_party/`, so the build stays
 self-contained and cross-compilable.
 
+### GPU
+
 The default build is CPU only. CUDA, Vulkan, ROCm (HIP), and Metal are optional
 backends; enable one at configure time:
 
 ```sh
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DIFREFLEX_CUDA=ON
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DIFREFLEX_CUDA=ON     # NVIDIA
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DIFREFLEX_VULKAN=ON   # AMD or Intel
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DIFREFLEX_HIP=ON      # AMD ROCm
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DIFREFLEX_METAL=ON    # Apple
+cmake --build build -j --target ifreflex-cli
 ```
+
+Each backend needs its own toolchain: the CUDA Toolkit, the Vulkan SDK (`glslc`
+and the loader), ROCm, or the Xcode command line tools. When cross-compiling, pin
+the target GPU with `-DCMAKE_CUDA_ARCHITECTURES=89` (CUDA) or
+`-DGPU_TARGETS=gfx1100` (HIP).
+
+Offload at runtime with `--gpu-layers -1` (all layers) or a positive layer count,
+and select devices with `--device CUDA0` or a comma-separated list.
+`--list-devices` prints what the build can use. A CPU-only build ignores
+`--gpu-layers`, so the same command line works everywhere.
 
 Run the CLI:
 

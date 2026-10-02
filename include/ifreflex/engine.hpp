@@ -86,6 +86,10 @@ public:
 
     std::string model_name() const;
     int context_size() const;
+    // Human-readable compute description: the model's backend plus the devices
+    // in use ("CPU" when nothing is offloaded).
+    std::string backend_name() const;
+    std::string device_name() const;
     // The GGUF's built-in `tokenizer.chat_template`, or "" if none.
     std::string chat_template() const;
     // Render a chat template (via llama_chat_apply_template) and split it around

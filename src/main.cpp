@@ -275,6 +275,7 @@ int main(int argc, char ** argv) {
         }
         std::cerr << "chat template: " << ifreflex::template_to_string(fmt.template_kind)
                   << (opts.templ == "auto" ? " (auto, from GGUF)" : "") << '\n';
+        std::cerr << "backend: " << eng.backend_name() << " on " << eng.device_name() << '\n';
 
         ifreflex::calibration cal;
         if (!opts.calibration.empty()) {
@@ -310,6 +311,8 @@ int main(int argc, char ** argv) {
                     {"ok", true},
                     {"status", "healthy"},
                     {"model", eng.model_name()},
+                    {"backend", eng.backend_name()},
+                    {"device", eng.device_name()},
                     {"prompt", ifreflex::style_to_string(fmt.style)},
                     {"template", ifreflex::template_to_string(fmt.template_kind)},
                     {"permutations", opts.permutations},

@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <sstream>
 #include <stdexcept>
 
 #include "ifreflex/prefix_cache.hpp"
@@ -54,6 +55,8 @@ struct engine::impl {
     std::string name;
     bool cache_hit_last = false;
     int last_state_tokens = 0;
+    int gpu_layers = 0;
+    std::vector<ggml_backend_dev_t> devices;  // must outlive the model
 
     // Cross-request LRU of decoded state prefixes, keyed by the exact prefix
     // tokens, so a state seen before skips its prefill.
@@ -77,7 +80,24 @@ struct engine::impl {
             throw std::invalid_argument("model not found: " + opts.model.string());
 
         llama_model_params mparams = llama_model_default_params();
-        if (opts.gpu_layers != 0) mparams.n_gpu_layers = opts.gpu_layers;
+        mparams.n_gpu_layers = opts.gpu_layers;
+        if (!opts.device.empty()) {
+            std::stringstream stream(opts.device);
+            std::string name;
+            while (std::getline(stream, name, ',')) {
+                const size_t begin = name.find_first_not_of(" \t");
+                if (begin == std::string::npos) continue;
+                const size_t end = name.find_last_not_of(" \t");
+                name = name.substr(begin, end - begin + 1);
+                ggml_backend_dev_t device = ggml_backend_dev_by_name(name.c_str());
+                if (!device) throw std::runtime_error("unknown device: " + name);
+                devices.push_back(device);
+            }
+            if (devices.empty()) throw std::runtime_error("no valid device in --device");
+            devices.push_back(nullptr);
+            mparams.devices = devices.data();
+        }
+        gpu_layers = opts.gpu_layers;
         model = llama_model_load_from_file(opts.model.string().c_str(), mparams);
         if (!model) throw std::runtime_error("failed to load model: " + opts.model.string());
 
@@ -315,7 +335,9 @@ std::vector<std::string> available_devices() {
     const size_t n = ggml_backend_dev_count();
     for (size_t i = 0; i < n; ++i) {
         ggml_backend_dev_t dev = ggml_backend_dev_get(i);
-        out.emplace_back(ggml_backend_dev_name(dev));
+        const char * dev_name = ggml_backend_dev_name(dev);
+        const char * desc = ggml_backend_dev_description(dev);
+        out.push_back(std::string(dev_name ? dev_name : "?") + " - " + (desc ? desc : ""));
     }
     return out;
 }
@@ -334,6 +356,23 @@ void engine::check_labels(const std::vector<std::string> & labels) const {
 
 std::string engine::model_name() const { return p->name; }
 int engine::context_size() const { return (int) llama_n_ctx(p->ctx); }
+std::string engine::backend_name() const {
+    char buf[256] = {};
+    llama_model_desc(p->model, buf, sizeof(buf));
+    return buf;
+}
+std::string engine::device_name() const {
+    if (p->gpu_layers == 0) return "CPU";
+    if (!p->devices.empty()) {
+        std::string names;
+        for (size_t i = 0; p->devices[i] != nullptr; ++i) {
+            if (!names.empty()) names += ",";
+            names += ggml_backend_dev_name(p->devices[i]);
+        }
+        return names;
+    }
+    return "GPU (n_gpu_layers=" + std::to_string(p->gpu_layers) + ")";
+}
 std::string engine::chat_template() const {
     const char * t = llama_model_chat_template(p->model, nullptr);
     return t ? std::string(t) : std::string();
