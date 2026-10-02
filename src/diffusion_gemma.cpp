@@ -1,16 +1,27 @@
 // DiffusionGemma denoise backend. This is the DiffusionGemma-specific half of
-// the old score_canvas: a fixed-length canvas whose non-answer positions are
-// pinned, driven with self-conditioning (llama_diffusion_set_sc) and the
-// prompt-KV phase machine (llama_diffusion_set_phase). Only DiffusionGemma
-// honours these; they are no-ops on other diffusion arches.
+// the structured read: a fixed-length canvas whose non-answer positions are
+// pinned, seeded with noise at the answer slots, driven with self-conditioning
+// (llama_diffusion_set_sc) and classifier-free guidance.
+//
+// The reference driver (third_party/llama.cpp/examples/diffusion) reads a
+// DiffusionGemma canvas with CFG: a conditional forward over [prompt | canvas]
+// and an unconditional forward with the prompt masked out, mixed as
+//   uncond + (cfg_scale + 1) * (cond - uncond)
+// which steers the per-position distribution onto the answer and away from the
+// filler a text backbone otherwise keeps generating. Without CFG the slot argmax
+// is a space or a connective, not a label, so the structured read collapses.
+// Only DiffusionGemma honours set_sc; it is a no-op on other diffusion arches.
 
 #include "ifreflex/diffusion_gemma.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <cstdlib>
 #include <random>
 #include <stdexcept>
 
+#include "ifreflex/diffusion_core.hpp"
 #include "llama.h"
 
 namespace ifreflex {
@@ -38,6 +49,8 @@ void gemma_backend::denoise(diffusion_runtime & rt,
     const size_t nq = slot_pos.size();
     const int n_input = (int) prompt_tokens.size();
     const int steps = std::max(1, rt.opts.steps);
+    float cfg_scale = (float) rt.opts.cfg_scale;
+    const int mask_id = rt.mask_id;
 
     const int need = (int) base.size() + 1; // + turn close
     if (need > C) throw std::invalid_argument("answer template does not fit the canvas");
@@ -55,48 +68,62 @@ void gemma_backend::denoise(diffusion_runtime & rt,
         if (slot_pos[qi] >= 0 && slot_pos[qi] < width)
             cur[(size_t) slot_pos[qi]] = (llama_token) vocab_dist(rng); // independent noise per slot
 
+    // Full sequence [prompt | canvas] in one batch, as the reference driver does.
+    const int total = n_input + width;
+    const int logit_off = n_input; // canvas rows start here in the logits buffer
     std::vector<float> sc_buffer((size_t) width * n_vocab, 0.0f);
-    llama_batch batch = llama_batch_init(n_input + width, 0, 1);
+    std::vector<llama_token> un_x((size_t) total, 0);
 
+    llama_batch batch = llama_batch_init(total, 0, 1);
     llama_set_causal_attn(rt.ctx, false);
 
-    // Prompt prefill through the prompt-KV store.
-    llama_diffusion_set_sc(rt.model, nullptr, 0.0f, 1.0f, false);
-    const int U = std::max(1, (int) llama_n_ubatch(rt.ctx));
-    for (int off = 0; off < n_input; off += U) {
-        const int u = std::min(U, n_input - off);
-        llama_diffusion_set_phase(rt.model, /*PKV_PREFILL=*/1, n_input, off);
-        batch.n_tokens = u;
-        for (int i = 0; i < u; ++i) {
-            batch.token[i] = prompt_tokens[off + i];
-            batch.pos[i] = off + i;
+    auto decode_seq = [&](const std::vector<llama_token> & seq, std::vector<float> & out) {
+        batch.n_tokens = total;
+        for (int i = 0; i < total; ++i) {
+            batch.token[i] = seq[(size_t) i];
+            batch.pos[i] = i;
             batch.n_seq_id[i] = 1;
             batch.seq_id[i][0] = 0;
-            batch.logits[i] = (i == u - 1) ? 1 : 0;
+            batch.logits[i] = 1;
         }
         if (llama_decode(rt.ctx, batch) != 0)
-            throw std::runtime_error("prompt prefill decode failed");
-    }
+            throw std::runtime_error("gemma canvas decode failed");
+        // Copy the canvas rows out immediately: llama_get_logits returns the
+        // context's single buffer, which the next decode overwrites.
+        const float * src = llama_get_logits(rt.ctx);
+        out.resize((size_t) width * n_vocab);
+        std::memcpy(out.data(), src + (size_t) logit_off * n_vocab,
+                    (size_t) width * n_vocab * sizeof(float));
+    };
+
+    std::vector<float> cond_rows, uncond_rows, mixed_rows;
 
     float prev_temp_inv = 1.0f;
     for (int step = 0; step < steps; ++step) {
         const float t = 0.5f;
         const float temp_inv = 1.0f / t;
-        llama_diffusion_set_phase(rt.model, /*PKV_DECODE=*/2, n_input, 0);
-        batch.n_tokens = width;
-        for (int i = 0; i < width; ++i) {
-            batch.token[i] = cur[i];
-            batch.pos[i] = n_input + i;
-            batch.n_seq_id[i] = 1;
-            batch.seq_id[i][0] = 0;
-            batch.logits[i] = 1;
-        }
+
+        std::vector<llama_token> seq((size_t) total, 0);
+        for (int i = 0; i < n_input; ++i) seq[(size_t) i] = prompt_tokens[(size_t) i];
+        for (int i = 0; i < width; ++i) seq[(size_t)(n_input + i)] = cur[(size_t) i];
+
         llama_diffusion_set_sc(rt.model, sc_buffer.data(),
                                step == 0 ? 0.0f : 1.0f, prev_temp_inv, true);
-        if (llama_decode(rt.ctx, batch) != 0)
-            throw std::runtime_error("canvas decode failed");
+        decode_seq(seq, cond_rows);
 
-        const float * logits = llama_get_logits(rt.ctx);
+        const std::vector<float> * rows = &cond_rows;
+        if (cfg_scale > 0.0f && mask_id >= 0) {
+            // Unconditional: mask the prompt (first n_input tokens), keep canvas.
+            std::copy(seq.begin(), seq.end(), un_x.begin());
+            for (int i = 0; i < n_input; ++i) un_x[(size_t) i] = (llama_token) mask_id;
+            decode_seq(un_x, uncond_rows);
+            // Mix canvas rows: uncond + (cfg+1)*(cond-uncond).
+            mixed_rows.resize((size_t) width * n_vocab);
+            for (size_t j = 0; j < mixed_rows.size(); ++j)
+                mixed_rows[j] = uncond_rows[j] + (cfg_scale + 1.0f) * (cond_rows[j] - uncond_rows[j]);
+            rows = &mixed_rows;
+        }
+        const float * logits = rows->data(); // canvas rows 0..width-1, absolute pos = logit_off + slot
 
         if (step == steps - 1) {
             for (size_t qi = 0; qi < nq; ++qi) {
@@ -124,7 +151,6 @@ void gemma_backend::denoise(diffusion_runtime & rt,
         prev_temp_inv = temp_inv;
     }
 
-    llama_diffusion_set_phase(rt.model, /*PKV_UNIFIED=*/0, 0, 0);
     llama_diffusion_set_sc(rt.model, nullptr, 0.0f, 1.0f, false);
     llama_batch_free(batch);
 }

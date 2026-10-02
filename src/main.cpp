@@ -23,6 +23,7 @@ struct cli_options {
     std::string templ = "chatml";
     int permutations = 2;
     std::string combine = "mean";
+    std::string labels = "letters";
     bool canonical = false;
     double prior_strength = 0.75;
     int prior_min_n = 8;
@@ -43,6 +44,7 @@ struct cli_options {
     bool diffusion = false;
     int diffusion_steps = 1;
     int diffusion_samples = 2;
+    double diffusion_cfg = 1.0;
 
     bool server = false;
     std::string host = "127.0.0.1";
@@ -71,6 +73,11 @@ void usage() {
         "    reflex_compact   one JSON object per question\n"
         "    semif            SemIf direct-options JSON object\n"
         "    rwkv_jev         RWKV-Jev catalog + JSON field lead (fork readout)\n"
+        "\n"
+        "--labels STYLE selects the single-token option label to read:\n"
+        "    letters  A, B, ... for every option (default, reflex / SemIf parity)\n"
+        "    djev     natural words: noul reads yes/no, score reads 0..n-1, choice reads\n"
+        "             letters (djev-dev CHOICE_LABELS; reads better on a text-backed model)\n"
         "\n"
         "--permutations N averages each letter-readout question over N distinct\n"
         "    option orders (1-8, default 2); this cancels position bias.\n"
@@ -135,6 +142,7 @@ int main(int argc, char ** argv) {
             else if (arg == "--permutations") opts.permutations = std::stoi(val("--permutations"));
             else if (arg == "--combine") opts.combine = val("--combine");
             else if (arg == "--canonical-order") opts.canonical = true;
+            else if (arg == "--labels") opts.labels = val("--labels");
             else if (arg == "--dump-branches") opts.dump_branches = val("--dump-branches");
             else if (arg == "--fit-calibration") opts.fit_calibration = val("--fit-calibration");
             else if (arg == "--fit-out") opts.fit_out = val("--fit-out");
@@ -153,6 +161,7 @@ int main(int argc, char ** argv) {
             else if (arg == "--diffusion") opts.diffusion = true;
             else if (arg == "--diffusion-steps") opts.diffusion_steps = std::stoi(val("--diffusion-steps"));
             else if (arg == "--diffusion-samples") opts.diffusion_samples = std::stoi(val("--diffusion-samples"));
+            else if (arg == "--diffusion-cfg") opts.diffusion_cfg = std::stod(val("--diffusion-cfg"));
             else if (arg == "--server") opts.server = true;
             else if (arg == "--host") opts.host = val("--host");
             else if (arg == "--port") opts.port = std::stoi(val("--port"));
@@ -217,6 +226,8 @@ int main(int argc, char ** argv) {
 
         ifreflex::prompt_format fmt;
         fmt.style = ifreflex::style_from_string(opts.prompt);
+        fmt.labels = ifreflex::label_style_from_string(opts.labels);
+        fmt.canonical_order = opts.canonical;
 
         ifreflex::engine_options eopts;
         eopts.model = opts.model;
@@ -239,6 +250,7 @@ int main(int argc, char ** argv) {
             dopts.device = opts.device;
             dopts.steps = opts.diffusion_steps;
             dopts.samples = opts.diffusion_samples;
+            dopts.cfg_scale = opts.diffusion_cfg;
             dopts.permutations = opts.permutations;
             ifreflex::diffusion_engine deng(dopts);
             std::cerr << "backend: " << deng.backend_name() << " on " << deng.model_name()

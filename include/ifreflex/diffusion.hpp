@@ -52,6 +52,11 @@ struct diffusion_options {
     int samples = 1;      // independent noise draws averaged per question.
     int permutations = 1; // option-order permutations averaged (reflex position-bias removal).
     double temperature = 1.0; // logit temperature before the restricted softmax.
+    // Classifier-free guidance (DiffusionGemma). 0 disables it; a positive value
+    // mixes cond/uncond logits as uncond + (cfg+1)*(cond-uncond), steering the
+    // canvas distribution onto the answer and away from filler. Required for a
+    // usable structured read on a text-backed diffusion model.
+    double cfg_scale = 1.0;
 };
 
 // One question's restricted read: probabilities over `keys` (renormalised),

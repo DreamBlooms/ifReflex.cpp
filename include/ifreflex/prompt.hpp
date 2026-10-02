@@ -25,6 +25,24 @@ using json = nlohmann::ordered_json;
 
 enum class prompt_style { reflex_markdown, reflex_compact, semif, rwkv_jev };
 
+// How each option is projected onto a single-token label to read:
+//   letters  every option is a letter code (A, B, ...), reflex / SemIf style.
+//   djev     natural words: noul reads yes/no, score reads 1..n, choice reads
+//            letters. Matches mmastrac/djev, which reads far better on a
+//            text-backed diffusion model than arbitrary letters.
+enum class label_style { letters, djev };
+
+label_style label_style_from_string(const std::string & name);
+std::string label_style_to_string(label_style style);
+
+// The option labels a question reads, djev-style wording: noul uses the natural
+// words "yes"/"no", score uses 1-based digit strings ("1","2",...), and choice
+// uses letter codes. A text-backed model places far more mass on natural words
+// and digits than on arbitrary letters, so DiffusionGemma reads these by default
+// and an autoregressive model can opt in via label_style::djev. Keys stay the
+// answer keys (noul true/false, score 0-based).
+std::vector<std::string> answer_labels(question_kind kind, size_t n);
+
 // Chat wrapper: how system/user/assistant turns are delimited. Independent of the
 // body layout (prompt_style), so e.g. the reflex markdown body can be wrapped in
 // ChatML (Qwen), Gemma-4 turns, or RWKV world turns.
@@ -81,6 +99,9 @@ struct prompt_format {
     // together with `combine_mode::logmean`, which cancels the residual position
     // bias those shifts leave behind.
     bool canonical_order = false;
+    // Option-label projection. `letters` (default) keeps reflex / SemIf parity;
+    // `djev` reads natural yes/no, 1..n and letter codes instead (see label_style).
+    label_style labels = label_style::letters;
 };
 
 // Render a state / instructions / criteria value. Strings pass through; structured

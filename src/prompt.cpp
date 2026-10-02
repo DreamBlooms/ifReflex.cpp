@@ -1,6 +1,7 @@
 #include "ifreflex/prompt.hpp"
 
 #include <algorithm>
+#include <iterator>
 #include <stdexcept>
 
 namespace ifreflex {
@@ -113,6 +114,46 @@ const std::string & style_letters(prompt_style style) {
     static const std::string kReflex = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     static const std::string kSemif = "ABCDEFGHIJKLMNOP";
     return style == prompt_style::semif ? kSemif : kReflex;
+}
+
+label_style label_style_from_string(const std::string & name) {
+    if (name == "letters" || name == "letter") return label_style::letters;
+    if (name == "djev") return label_style::djev;
+    throw std::invalid_argument("label style must be letters or djev");
+}
+
+std::string label_style_to_string(label_style style) {
+    return style == label_style::djev ? "djev" : "letters";
+}
+
+std::vector<std::string> answer_labels(question_kind kind, size_t n) {
+    if (kind == question_kind::noul) {
+        // djev-dev words yes/no, bound to the answer keys {"true","false"} by
+        // position: labels[0] <-> keys[0] ("true") and labels[1] <-> keys[1]
+        // ("false"), so label "yes" means true and "no" means false.
+        return {"yes", "no"};
+    }
+    if (kind == question_kind::score) {
+        // djev-dev labels: 0-based digit strings ("0","1",...), one per level,
+        // matching the answer keys ("0","1",...) exactly.
+        std::vector<std::string> out;
+        out.reserve(n);
+        for (size_t i = 0; i < n; ++i) out.push_back(std::to_string(i));
+        return out;
+    }
+    // choice: djev-dev CHOICE_LABELS (A..Z, then AA, AB, ...).
+    static const std::string letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    std::vector<std::string> out;
+    out.reserve(n);
+    for (char c : letters) { if (out.size() >= n) break; out.push_back(std::string(1, c)); }
+    for (char a : letters) {
+        for (char b : letters) {
+            if (out.size() >= n) break;
+            out.push_back(std::string{a, b});
+        }
+    }
+    if (out.size() < n) throw std::invalid_argument("too many options for single-token labels");
+    return out;
 }
 
 size_t style_max_options(prompt_style style) {
@@ -455,8 +496,18 @@ std::vector<branch> build_branches(const prompt_format & fmt,
         std::vector<std::pair<std::string, std::string>> labelled;
         labels.reserve(order.size());
         const std::string & letters = style_letters(fmt.style);
+        // djev labels are bound to the option *key* (yes->true, no->false, and
+        // level i -> "i+1"), so a permutation cannot rebind them; letter labels
+        // are bound to the listing position. Both then carry order[i]'s text.
         for (size_t i = 0; i < order.size(); ++i) {
-            const std::string label(1, letters[i]);
+            std::string label;
+            if (fmt.labels == label_style::djev && kind != question_kind::choice) {
+                const size_t key_i = (size_t) std::distance(
+                    keys.begin(), std::find(keys.begin(), keys.end(), order[i]));
+                label = answer_labels(kind, keys.size())[key_i];
+            } else {
+                label.assign(1, letters[i]);
+            }
             labels.push_back(label);
             labelled.emplace_back(label, desc_of(order[i]));
         }

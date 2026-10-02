@@ -2,6 +2,7 @@
 // GGUF, ask one noul + one choice + one score question about a state, and print
 // the restricted distributions. Not part of the shipped binary -- a dev harness.
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 

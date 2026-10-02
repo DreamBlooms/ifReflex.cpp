@@ -87,6 +87,7 @@ struct slot_read {
 };
 slot_read read_slot(const float * row, const std::vector<int> & label_ids, int n_vocab);
 
+
 // Merge a question's (permutation x noise) restricted draws into one answer
 // distribution, then to a canvas_result. `branch_logits[branch]` are the draws
 // averaged within that permutation branch (keys in `keys_per_branch[branch]`

@@ -92,6 +92,7 @@ add_executable(smoke_diffusion
     src/diffusion_driver.cpp
     src/diffusion_gemma.cpp
     src/llada.cpp
+    src/prompt.cpp
     src/readout.cpp
     src/sys.cpp
 )

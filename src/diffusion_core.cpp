@@ -5,12 +5,16 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <map>
 #include <stdexcept>
 
+#include "ifreflex/prompt.hpp"
 #include "llama.h"
 
 namespace ifreflex {
+
 
 std::vector<llama_token> tokenize_text(const llama_vocab * vocab, const std::string & text,
                                       bool add_special, bool parse_special) {
@@ -76,8 +80,13 @@ void parse_question(const std::string & qid, const json & q, canvas_question & o
         }
     }
 
-    // Project each key onto a distinct single-token code.
-    out.labels = label_codes(out.keys.size());
+    // Project each key onto a single-token canvas label, djev-style: noul uses
+    // the natural words yes/no, score uses 1-based digit strings, and choice
+    // uses letter codes. A text-backed diffusion model places far more mass on
+    // natural words / digits than on arbitrary letters, so the label wording
+    // matters as much as the readout. Keys stay as the answer keys (noul
+    // true/false, score 0-based index) and are unmapped here.
+    out.labels = answer_labels(out.kind, out.keys.size());
 
     // Staged scheduling fields (djev depends_on / ask_if / alone).
     if (q.contains("depends_on") && q.at("depends_on").is_array())
@@ -142,10 +151,12 @@ const std::vector<std::string> & question_labels(const canvas_question & q) {
 std::string build_template_text(const std::string & head,
                                 const std::vector<canvas_question> & questions,
                                 const std::vector<std::string> & labels) {
+    // djev-dev encode_answer: scaffold + "index:label" rows joined by newlines,
+    // matching the prompt's "id:label" reply format (id is the question index).
     std::string text = head;
     for (size_t i = 0; i < questions.size(); ++i) {
-        text += questions[i].qid;
-        text += ": ";
+        text += std::to_string(i);
+        text += ":";
         text += labels[i];
         text += "\n";
     }
@@ -237,6 +248,7 @@ slot_read read_slot(const float * row, const std::vector<int> & label_ids, int n
     const int argmax = (int) (std::max_element(row, row + n_vocab) - row);
     out.argmax_is_label =
         std::find(label_ids.begin(), label_ids.end(), argmax) != label_ids.end();
+
     return out;
 }
 

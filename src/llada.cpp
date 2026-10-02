@@ -12,6 +12,7 @@
 #include <random>
 #include <stdexcept>
 
+#include "ifreflex/diffusion_core.hpp"
 #include "llama.h"
 
 namespace ifreflex {
