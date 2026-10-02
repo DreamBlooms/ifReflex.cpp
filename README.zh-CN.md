@@ -110,7 +110,7 @@ build/ifreflex-cli --diffusion --server --port 8080 \
 因此恒满足归一化。
 
 **该路径同样不执行推理。** 画布以一个空思考块（`<|channel>thought\n<channel|>`）开头并钉死，
-使 DiffusionGemma 判定思考通道已闭合，从而直接作答，而不先生成思维链。
+使 DiffusionGemma 判定思考已闭合，从而直接作答，而不先生成思维链。
 
 该路径依赖 llama.cpp 的 DiffusionGemma 构建（由 [#24423](https://github.com/ggml-org/llama.cpp/pull/24423)
 合入）；原生 `llama-cli` / `llama-server` 尚不支持此类模型。CPU 即可运行，无需 GPU，
