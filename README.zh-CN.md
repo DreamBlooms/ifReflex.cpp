@@ -68,12 +68,13 @@ token 精确索引），因此重复出现的 state 可跳过 prefill；state �
 
 ## 扩散模型（Diffusion LLM）
 
-ifreflex 还能在**块扩散**（block-diffusion）模型（[DiffusionGemma](https://github.com/ggml-org/llama.cpp/pull/24423)）
-上回答类型化决策——这类模型根本没有"下一个 token 的 logits"。扩散模型每一步前向去噪
-整块**画布**（canvas）token；若画布用一份答案模板填充，固定文本全部钉死（pin），只留答案
-槽位为噪声，那么一步去噪就能得到每个槽位的分布。这个分布**就是**答案。
+自回归模型靠"下一个 token 的 logits"作答，扩散模型不走这条路。DiffusionGemma 属于
+**块扩散**（block-diffusion）模型（[DiffusionGemma](https://github.com/ggml-org/llama.cpp/pull/24423)）：
+它每一步同时去噪一整块 token，这块 token 叫作**画布**（canvas）。我们把画布预先填上
+答案模板——固定的字全部钉死（pin）不动，只把答案槽位留成噪声。于是去噪一步，每个槽位就
+得到一个分布，而这个分布直接就是答案，不用再生成文字、也不用解析。
 
-用 `--diffusion` 启动 DiffusionGemma GGUF：
+启动时加 `--diffusion` 即可，模型换成 DiffusionGemma 的 GGUF：
 
 ```sh
 build/ifreflex-cli --diffusion --server --port 8080 \
@@ -81,18 +82,18 @@ build/ifreflex-cli --diffusion --server --port 8080 \
   --diffusion-steps 1 --diffusion-samples 3 --permutations 2
 ```
 
-`POST /v1/systemone` 契约不变——同一请求体对两种后端通用。读出是**单步结构化读**：
-不生成任何散文、不解析 JSON，答案代价为零生成 token。
+接口完全不用改，`POST /v1/systemone` 的请求体对两种后端通用。整个读出就是**一步结构化读**：
+不写一个字的散文，不解析 JSON，答案的代价是零个生成 token。三个参数用来换稳定性和精度：
 
 | 参数 | 作用 |
 | --- | --- |
-| `--diffusion-steps N` | 读出前的去噪步数（1 = djev 的单步读） |
-| `--diffusion-samples N` | 每题平均的独立噪声采样次数 |
-| `--permutations N` | 平均的选项顺序置换数（消除位置偏差） |
+| `--diffusion-steps N` | 读出前先去噪几步（1 就是 djev 那种一步直读） |
+| `--diffusion-samples N` | 换几组噪声各读一次再平均 |
+| `--permutations N` | 把选项顺序打乱几遍再平均，抹掉位置偏好 |
 
-问题可用 `depends_on` / `ask_if` **分阶段**编排，与 [djev](https://github.com/mmastrac/djev)
-一致：问题按依赖层级执行，每层一次联合画布读，后续层通过预填充的 `Answers so far` 上下文
-以前序答案为条件。`ask_if` 依赖值不在允许集合内的问题会被跳过并返回 `null`。
+问题之间还能用 `depends_on` / `ask_if` 排先后，做法和 [djev](https://github.com/mmastrac/djev)
+一致：问题按依赖关系分层，每层做一次联合画布读，后面的层会把前面的答案写进 `Answers so far`
+上下文里当作条件。某道题的 `ask_if` 条件没满足时，它会被跳过，答案记为 `null`。
 
 ```json
 {"state": {"message": "登录页对所有人返回 500。"},
@@ -103,18 +104,18 @@ build/ifreflex-cli --diffusion --server --port 8080 \
                 "depends_on": ["route"], "ask_if": {"route": ["technical support"]}}}}
 ```
 
-每个答案还带一个 `diagnostics` 块：`label_mass` 是槽位全词表分布中落在声明选项码上的
-质量占比（文本模型的天然 argmax 往往是选项*名*本身，所以这是置信度信号，不是正确性信号）；
-`argmax_is_label` 报告槽位的整体 argmax 是否为合法标签。答案概率只在声明标签上做 softmax，
-因此永远和为 1。
+每个答案还附带一个 `diagnostics` 块。其中 `label_mass` 表示槽位那一步的全词表分布里，有多大
+比例落在你给的几个选项码上——文本模型天然的 argmax 往往是选项的*名字*而非字母，所以这个值
+更像一个置信度信号，不代表对错；`argmax_is_label` 则告诉我们槽位的整体 argmax 是不是合法
+标签。答案概率只在声明的标签上做 softmax，因此加起来永远是 1。
 
-**这条路径同样不做推理。** 画布以一个空思考块（`<|channel>thought\n<channel|>`）开头并
-钉死，DiffusionGemma 会认为思考通道已开又关，于是直接作答，而不是先写思维链。
+**这里同样不推理。** 画布开头钉着一个空的思考块（`<|channel>thought\n<channel|>`），让
+DiffusionGemma 以为思考通道已经开过又关上了，于是直接作答，而不是先写一串思维链。
 
-此路径需要 llama.cpp 的 DiffusionGemma 构建（由 [#24423](https://github.com/ggml-org/llama.cpp/pull/24423)
-合入）；原生 `llama-cli` / `llama-server` 无法驱动这类模型。CPU 可用（无需 GPU），
-但 26B 权重约需 24 GB 内存才能加载。选项被投影到单 token 字母码（`A`、`B`……、`AA`、`AB`……），
-因此选项*名*可以任意长。
+这套路径依赖 llama.cpp 的 DiffusionGemma 构建（由 [#24423](https://github.com/ggml-org/llama.cpp/pull/24423)
+合入）；原生的 `llama-cli` / `llama-server` 还驱动不了这类模型。纯 CPU 就能跑，不需要 GPU，
+不过 26B 的权重约需 24 GB 内存才装得下。选项名会被映射到单 token 的字母码（`A`、`B`……、
+`AA`、`AB`……），所以选项叫什么、有多长都无所谓。
 
 ## 提示词风格
 
