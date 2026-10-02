@@ -54,6 +54,7 @@ find_package(Threads REQUIRED)
 add_executable(ifreflex-cli
     src/main.cpp
     src/engine.cpp
+    src/diffusion.cpp
     src/prompt.cpp
     src/readout.cpp
     src/protocol.cpp
@@ -77,3 +78,18 @@ target_include_directories(test_readout PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
 )
 add_test(NAME readout_parity COMMAND test_readout)
+
+# Offline harness for the diffusion structured readout (DiffusionGemma canvases).
+add_executable(smoke_diffusion
+    scripts/smoke_diffusion.cpp
+    src/diffusion.cpp
+    src/readout.cpp
+)
+target_include_directories(smoke_diffusion PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
+)
+target_link_libraries(smoke_diffusion PRIVATE llama Threads::Threads)
+if (WIN32)
+    target_link_libraries(smoke_diffusion PRIVATE ws2_32)
+endif()

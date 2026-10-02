@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "ifreflex/engine.hpp"
+#include "ifreflex/diffusion.hpp"
 #include "ifreflex/http.hpp"
 #include "ifreflex/protocol.hpp"
 #include "ifreflex/prompt.hpp"
@@ -38,6 +39,10 @@ struct cli_options {
     bool show_template = false;
     bool list_devices = false;
     bool list_templates = false;
+
+    bool diffusion = false;
+    int diffusion_steps = 1;
+    int diffusion_samples = 2;
 
     bool server = false;
     std::string host = "127.0.0.1";
@@ -145,6 +150,9 @@ int main(int argc, char ** argv) {
             else if (arg == "--show-template") opts.show_template = true;
             else if (arg == "--list-devices") opts.list_devices = true;
             else if (arg == "--list-templates") opts.list_templates = true;
+            else if (arg == "--diffusion") opts.diffusion = true;
+            else if (arg == "--diffusion-steps") opts.diffusion_steps = std::stoi(val("--diffusion-steps"));
+            else if (arg == "--diffusion-samples") opts.diffusion_samples = std::stoi(val("--diffusion-samples"));
             else if (arg == "--server") opts.server = true;
             else if (arg == "--host") opts.host = val("--host");
             else if (arg == "--port") opts.port = std::stoi(val("--port"));
@@ -218,6 +226,57 @@ int main(int argc, char ** argv) {
         eopts.gpu_layers = opts.gpu_layers;
         eopts.prefix_cache_mib = (size_t) std::max(0, opts.prefix_cache_mib);
         eopts.device = opts.device;
+
+        // Diffusion block-canvas backend: structured reads on DiffusionGemma.
+        // Bypasses the letter-token engine entirely.
+        if (opts.diffusion) {
+            ifreflex::diffusion_options dopts;
+            dopts.model = opts.model;
+            dopts.threads = opts.threads;
+            dopts.n_batch = opts.n_batch;
+            dopts.ctx_size = opts.ctx_size;
+            dopts.gpu_layers = opts.gpu_layers;
+            dopts.device = opts.device;
+            dopts.steps = opts.diffusion_steps;
+            dopts.samples = opts.diffusion_samples;
+            dopts.permutations = opts.permutations;
+            ifreflex::diffusion_engine deng(dopts);
+            std::cerr << "backend: " << deng.backend_name() << " on " << deng.model_name()
+                      << " (canvas " << deng.canvas_length() << ")\n";
+
+            if (opts.server) {
+                ifreflex::http_options hopts;
+                hopts.host = opts.host;
+                hopts.port = opts.port;
+                hopts.model = opts.served_name;
+                hopts.api_key = opts.api_key;
+                hopts.cors_origin = opts.cors_origin;
+                auto health = [&deng, &opts]() -> ifreflex::json {
+                    return {{"ok", true},
+                            {"status", "healthy"},
+                            {"model", deng.model_name()},
+                            {"backend", deng.backend_name()},
+                            {"canvas", deng.canvas_length()},
+                            {"steps", opts.diffusion_steps},
+                            {"samples", opts.diffusion_samples},
+                            {"permutations", opts.permutations}};
+                };
+                return ifreflex::serve_http(hopts,
+                    [&deng](const ifreflex::json & req) { return deng.predict(req); },
+                    health);
+            }
+
+            // Offline: one JSON request per line of --input.
+            std::ifstream in(opts.input);
+            if (!in) throw std::invalid_argument("cannot open input: " + opts.input);
+            std::string line;
+            while (std::getline(in, line)) {
+                if (line.empty()) continue;
+                const ifreflex::json req = ifreflex::json::parse(line);
+                std::cout << deng.predict(req).dump() << '\n';
+            }
+            return 0;
+        }
 
         ifreflex::engine eng(eopts);
 
