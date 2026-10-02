@@ -82,7 +82,7 @@ std::vector<canvas_result> run_canvas(diffusion_runtime & rt,
             instructions += ": ";
             instructions += questions[i].keys[k];
             if (k < questions[i].descs.size() && !questions[i].descs[k].empty()) {
-                instructions += " \u2014 ";
+                instructions += " - ";
                 instructions += questions[i].descs[k];
             }
             instructions += '\n';
