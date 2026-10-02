@@ -128,7 +128,7 @@ build/ifreflex-cli --diffusion --server --port 8080 \
 因此恒满足归一化。
 
 **该路径同样不执行推理。** 在 DiffusionGemma 上，画布以一个空思考块（`<|channel>thought\n<channel|>`）
-开头并钉死，使模型判定思考通道已闭合，从而直接作答，而不先生成思维链。LLaDA-MoE 没有需要
+开头并钉死，使模型判定思考已闭合，从而直接作答，而不先生成思维链。LLaDA-MoE 没有需要
 抑制的思考通道，因此无需该脚手架。
 
 两种架构均依赖本仓库的 llama.cpp 扩散构建（DiffusionGemma 由 [#24423](https://github.com/ggml-org/llama.cpp/pull/24423)
