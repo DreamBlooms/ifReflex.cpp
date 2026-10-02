@@ -75,14 +75,21 @@ any stock instruct GGUF works.
 
 ## Diffusion LLMs
 
-ifreflex also answers typed decisions on a **block-diffusion** model
-([DiffusionGemma](https://github.com/ggml-org/llama.cpp/pull/24423)), where there
+ifreflex also answers typed decisions on a **block-diffusion** model, where there
 is no next-token logits at all. A diffusion model denoises a whole **canvas** of
 tokens per forward pass; if the canvas is seeded with an answer template whose
 fixed text is pinned and only the answer slots are left as noise, one denoise step
 gives a distribution over every slot. That distribution *is* the answer.
 
-Serve a DiffusionGemma GGUF with `--diffusion`:
+Two diffusion architectures are supported. The backend is chosen automatically
+from the GGUF at load — no flag selects it.
+
+| arch | model | how a slot is read |
+| --- | --- | --- |
+| `diffusion-gemma` | [DiffusionGemma](https://github.com/ggml-org/llama.cpp/pull/24423) | fixed-length canvas, non-answer text pinned, self-conditioning + prompt-KV phases |
+| `llada-moe` | [LLaDA-MoE](https://huggingface.co/inclusionAI/LLaDA-MoE-7B-A1B-Instruct) | mask-token seeding, one non-causal forward over prompt + answer rows |
+
+Serve a diffusion GGUF with `--diffusion`:
 
 ```sh
 build/ifreflex-cli --diffusion --server --port 8080 \
@@ -116,21 +123,26 @@ falls outside its allowed values is skipped and answered `null`.
 ```
 
 Every answer also carries a `diagnostics` block: `label_mass` is the fraction of
-the slot's full-vocabulary mass that landed on the declared option codes (a text
-model's natural argmax is often the option *name*, so this is a confidence
-signal, not a correctness one), and `argmax_is_label` reports whether the slot's
-overall argmax was a valid label. Answer probabilities are the softmax over the
-declared labels only, so they always sum to one.
+the slot's full-vocabulary mass that landed on the declared option codes, and
+`argmax_is_label` reports whether the slot's overall argmax was a valid label. On
+a text-backed diffusion model (DiffusionGemma) the natural argmax is often the
+option *name*, so `label_mass` is a confidence signal, not a correctness one and
+`argmax_is_label` is usually false; a native mask-diffusion model (LLaDA-MoE)
+places its mass on the label codes, so `label_mass` is high and `argmax_is_label`
+is usually true. Answer probabilities are the softmax over the declared labels
+only, so they always sum to one.
 
-**Decisions never reason here either.** The canvas starts with an empty thought
-block (`<|channel>thought\n<channel|>`), pinned in place, so DiffusionGemma sees
-the thought channel as already open-and-closed and answers directly instead of
-writing a chain of thought first.
+**Decisions never reason here either.** On DiffusionGemma the canvas starts with
+an empty thought block (`<|channel>thought\n<channel|>`), pinned in place, so the
+model sees the thought channel as already open-and-closed and answers directly
+instead of writing a chain of thought first. LLaDA-MoE has no thought channel to
+suppress and needs no scaffold.
 
-This path needs the DiffusionGemma build of llama.cpp (merged here from
-[#24423](https://github.com/ggml-org/llama.cpp/pull/24423)); the stock
-`llama-cli` / `llama-server` cannot drive these models. CPU works (no GPU
-required), but a 26B checkpoint wants ~24 GB of memory to load. Options are
+Both arches need this llama.cpp diffusion build (DiffusionGemma merged from
+[#24423](https://github.com/ggml-org/llama.cpp/pull/24423); LLaDA-MoE is already
+registered); the stock `llama-cli` / `llama-server` cannot drive these models.
+CPU works (no GPU required) — a 26B DiffusionGemma checkpoint wants ~24 GB of
+memory to load, while LLaDA-MoE is a 7B model (1.4B active, ~8 GB). Options are
 projected onto single-token letter codes (`A`, `B`, … , `AA`, `AB`, …), so any
 option *name* may be as long as you like.
 

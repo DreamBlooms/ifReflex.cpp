@@ -68,13 +68,19 @@ token 精确索引），因此重复出现的 state 可跳过 prefill；state �
 
 ## 扩散模型（Diffusion LLM）
 
-除自回归模型外，ifreflex 也支持**块扩散**（block-diffusion）模型
-（[DiffusionGemma](https://github.com/ggml-org/llama.cpp/pull/24423)）。这类模型不依赖
+除自回归模型外，ifreflex 也支持**块扩散**（block-diffusion）模型。这类模型不依赖
 "下一个 token 的 logits"作答：每一步前向去噪整块**画布**（canvas）token。将画布预置为
 一份答案模板，其中固定文本全部钉死（pin），仅答案槽位保留为噪声，一步去噪后每个槽位即
 得到一个分布，该分布即为答案。
 
-启动时指定 `--diffusion`，并将模型换为 DiffusionGemma 的 GGUF：
+目前支持两种扩散架构，加载时由 GGUF 自动判定，无需额外参数指定：
+
+| 架构 | 模型 | 槽位读出方式 |
+| --- | --- | --- |
+| `diffusion-gemma` | [DiffusionGemma](https://github.com/ggml-org/llama.cpp/pull/24423) | 固定长度画布，非答案文本全部钉死，自条件 + prompt-KV 相位 |
+| `llada-moe` | [LLaDA-MoE](https://huggingface.co/inclusionAI/LLaDA-MoE-7B-A1B-Instruct) | mask token 播种，对提示与答案行做一次非因果前向 |
+
+启动时指定 `--diffusion`，并将模型换为对应架构的 GGUF：
 
 ```sh
 build/ifreflex-cli --diffusion --server --port 8080 \
@@ -105,17 +111,20 @@ build/ifreflex-cli --diffusion --server --port 8080 \
 ```
 
 每个答案附带一个 `diagnostics` 块。`label_mass` 表示槽位全词表分布中落在所声明选项码上的
-概率质量占比；由于文本模型的天然 argmax 常为选项*名*本身，该值反映的是置信度，而非正确性。
-`argmax_is_label` 报告槽位的整体 argmax 是否为合法标签。答案概率仅在所声明标签上做 softmax，
+概率质量占比；`argmax_is_label` 报告槽位的整体 argmax 是否为合法标签。对文本骨干的扩散模型
+（DiffusionGemma）而言，天然 argmax 常为选项*名*本身，故 `label_mass` 反映的是置信度而非
+正确性，`argmax_is_label` 通常为 false；原生掩码扩散模型（LLaDA-MoE）则将质量落在选项码上，
+`label_mass` 较高且 `argmax_is_label` 通常为 true。答案概率仅在所声明标签上做 softmax，
 因此恒满足归一化。
 
-**该路径同样不执行推理。** 画布以一个空思考块（`<|channel>thought\n<channel|>`）开头并钉死，
-使 DiffusionGemma 判定思考通道已闭合，从而直接作答，而不先生成思维链。
+**该路径同样不执行推理。** 在 DiffusionGemma 上，画布以一个空思考块（`<|channel>thought\n<channel|>`）
+开头并钉死，使模型判定思考通道已闭合，从而直接作答，而不先生成思维链。LLaDA-MoE 没有需要
+抑制的思考通道，因此无需该脚手架。
 
-该路径依赖 llama.cpp 的 DiffusionGemma 构建（由 [#24423](https://github.com/ggml-org/llama.cpp/pull/24423)
-合入）；原生 `llama-cli` / `llama-server` 尚不支持此类模型。CPU 即可运行，无需 GPU，
-但加载 26B 权重约需 24 GB 内存。选项名被映射为单 token 字母码（`A`、`B`……、`AA`、`AB`……），
-因此选项名本身可以任意长。
+两种架构均依赖本仓库的 llama.cpp 扩散构建（DiffusionGemma 由 [#24423](https://github.com/ggml-org/llama.cpp/pull/24423)
+合入，LLaDA-MoE 已原生注册）；原生 `llama-cli` / `llama-server` 尚不支持此类模型。CPU 即可运行，
+无需 GPU——26B 的 DiffusionGemma 加载约需 24 GB 内存，而 LLaDA-MoE 为 7B 模型（激活 1.4B，约 8 GB）。
+选项名被映射为单 token 字母码（`A`、`B`……、`AA`、`AB`……），因此选项名本身可以任意长。
 
 ## 提示词风格
 
