@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "ifreflex/diffusion.hpp"
+#include "ifreflex/prompt.hpp"
 #include "llama.h"
 
 struct llama_vocab;
@@ -36,7 +37,8 @@ std::vector<std::string> label_codes(size_t n);
 // Parse one question's criteria into (keys, labels, legend) and its staged
 // scheduling fields. `keys` are the answer keys to_answer reports; `labels` are
 // the single-token codes each key is projected onto.
-void parse_question(const std::string & qid, const json & q, canvas_question & out);
+void parse_question(const llama_vocab * vocab, const std::string & qid, const json & q,
+                    canvas_question & out, label_style style);
 
 // Topological levels by depends_on (djev schedule): questions in one level are
 // read jointly; a level runs after every level its members depend on. Declaration
@@ -86,6 +88,7 @@ struct slot_read {
     bool argmax_is_label = true;
 };
 slot_read read_slot(const float * row, const std::vector<int> & label_ids, int n_vocab);
+void set_diag_vocab(const llama_vocab * v);
 
 
 // Merge a question's (permutation x noise) restricted draws into one answer

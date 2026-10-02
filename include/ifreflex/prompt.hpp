@@ -41,7 +41,7 @@ std::string label_style_to_string(label_style style);
 // and digits than on arbitrary letters, so DiffusionGemma reads these by default
 // and an autoregressive model can opt in via label_style::djev. Keys stay the
 // answer keys (noul true/false, score 0-based).
-std::vector<std::string> answer_labels(question_kind kind, size_t n);
+std::vector<std::string> answer_labels(question_kind kind, size_t n, label_style style);
 
 // Chat wrapper: how system/user/assistant turns are delimited. Independent of the
 // body layout (prompt_style), so e.g. the reflex markdown body can be wrapped in

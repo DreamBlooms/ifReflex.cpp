@@ -10,6 +10,10 @@ namespace ifreflex {
 // make_backend when the model declares diffusion.canvas_length.
 struct gemma_backend : diffusion_backend {
     std::string scaffold_head(const diffusion_runtime & rt) const override;
+    std::string build_prompt(const diffusion_runtime & rt,
+                             const std::string & instructions,
+                             const std::string & state_text,
+                             const std::string & prior_context) const override;
     void denoise(diffusion_runtime & rt,
                  const std::string & head,
                  const std::vector<llama_token> & prompt_tokens,

@@ -14,6 +14,15 @@
 #include "llama.h"
 
 namespace ifreflex {
+namespace {
+const llama_vocab * g_diag_vocab = nullptr;
+std::string tok_piece(int id) {
+    if (!g_diag_vocab) return "#"+std::to_string(id);
+    char buf[64]={0}; int n=llama_token_to_piece(g_diag_vocab,id,buf,63,0,false);
+    return n>0?std::string(buf,n):("#"+std::to_string(id));
+}
+}
+void set_diag_vocab(const llama_vocab * v){ g_diag_vocab=v; }
 
 
 std::vector<llama_token> tokenize_text(const llama_vocab * vocab, const std::string & text,
@@ -52,7 +61,8 @@ std::vector<std::string> label_codes(size_t n) {
     return out;
 }
 
-void parse_question(const std::string & qid, const json & q, canvas_question & out) {
+void parse_question(const llama_vocab * vocab, const std::string & qid, const json & q,
+                    canvas_question & out, label_style style) {
     out.qid = qid;
     const std::string type = q.at("type").get<std::string>();
     out.kind = kind_from_string(type);
@@ -60,12 +70,25 @@ void parse_question(const std::string & qid, const json & q, canvas_question & o
     const json criteria = q.value("criteria", json());
 
     if (out.kind == question_kind::noul) {
-        out.keys = {"true", "false"};
+        out.keys = {"false", "true"};  // djev order: label "no" <-> false, "yes" <-> true
+        out.descs = {
+            criteria.is_object() && criteria.contains("true") && criteria.at("true").is_string()
+                ? criteria.at("true").get<std::string>() : std::string(),
+            criteria.is_object() && criteria.contains("false") && criteria.at("false").is_string()
+                ? criteria.at("false").get<std::string>() : std::string()};
     } else if (out.kind == question_kind::choice) {
         if (criteria.is_object()) {
-            for (auto it = criteria.begin(); it != criteria.end(); ++it) out.keys.push_back(it.key());
+            for (auto it = criteria.begin(); it != criteria.end(); ++it) {
+                out.keys.push_back(it.key());
+                out.descs.push_back(it.value().is_string() ? it.value().get<std::string>()
+                                     : (it.value().is_null() ? std::string() : it.value().dump()));
+            }
         } else if (criteria.is_array()) {
-            for (size_t i = 0; i < criteria.size(); ++i) out.keys.push_back(std::to_string(i));
+            for (size_t i = 0; i < criteria.size(); ++i) {
+                out.keys.push_back(std::to_string(i));
+                out.descs.push_back(criteria[i].is_string() ? criteria[i].get<std::string>()
+                                     : (criteria[i].is_null() ? std::string() : criteria[i].dump()));
+            }
         } else {
             throw std::invalid_argument("choice criteria must be an object or array");
         }
@@ -76,6 +99,8 @@ void parse_question(const std::string & qid, const json & q, canvas_question & o
         if (n < 2 || n > 10) throw std::invalid_argument("a score takes 2 to 10 levels");
         for (size_t i = 0; i < n; ++i) {
             out.keys.push_back(std::to_string(i)); // numeric index (to_answer stoul)
+            out.descs.push_back(criteria[i].is_string() ? criteria[i].get<std::string>()
+                                 : (criteria[i].is_null() ? std::string() : criteria[i].dump()));
             out.legend[std::to_string(i)] = criteria[i];
         }
     }
@@ -86,7 +111,26 @@ void parse_question(const std::string & qid, const json & q, canvas_question & o
     // natural words / digits than on arbitrary letters, so the label wording
     // matters as much as the readout. Keys stay as the answer keys (noul
     // true/false, score 0-based index) and are unmapped here.
-    out.labels = answer_labels(out.kind, out.keys.size());
+    out.labels = answer_labels(out.kind, out.keys.size(), style);
+    // djev-dev reads letter codes, but a text-backed diffusion model often
+    // outputs the option *name* itself (e.g. " courier") rather than a letter
+    // when the name is a single token. When every option name (" " + key) is a
+    // single token, use those names as the labels so the read matches the
+    // model's natural output; otherwise fall back to the letter codes. This is
+    // what recovers structured reads on short-word options that otherwise
+    // escape to prose (label_mass collapses to ~1e-22 on the letters).
+    if (vocab && style == label_style::djev) {
+        std::vector<std::string> names;
+        bool all_single = !out.keys.empty();
+        for (const auto & key : out.keys) {
+            const std::string tok = " " + key;
+            const std::vector<llama_token> ids =
+                tokenize_text(vocab, tok, /*add_special=*/false, /*parse_special=*/true);
+            if (ids.size() != 1) { all_single = false; break; }
+            names.push_back(tok);
+        }
+        if (all_single) out.labels = names;
+    }
 
     // Staged scheduling fields (djev depends_on / ask_if / alone).
     if (q.contains("depends_on") && q.at("depends_on").is_array())
@@ -249,6 +293,14 @@ slot_read read_slot(const float * row, const std::vector<int> & label_ids, int n
     out.argmax_is_label =
         std::find(label_ids.begin(), label_ids.end(), argmax) != label_ids.end();
 
+    if (std::getenv("IFREFLEX_DIAG")) {
+        std::fprintf(stderr,"[diag] mass=%.3g argmax=%d(%s) is_lab=%d top5=", out.label_mass, argmax, tok_piece(argmax).c_str(), (int)out.argmax_is_label);
+        int top[5]={-1,-1,-1,-1,-1};
+        for(int k=0;k<5;k++){int best=-1;for(int v=0;v<n_vocab;v++){bool used=false;for(int j=0;j<k;j++)if(top[j]==v)used=true;if(!used&&(best<0||row[v]>row[best]))best=v;}top[k]=best;}
+        for(int k=0;k<5;k++) std::fprintf(stderr,"%s:%.2g ", tok_piece(top[k]).c_str(), std::exp((double)row[top[k]]-mx));
+        std::fprintf(stderr," labels="); for(int lid:label_ids) std::fprintf(stderr,"%s ", tok_piece(lid).c_str());
+        std::fprintf(stderr,"\n"); std::fflush(stderr);
+    }
     return out;
 }
 

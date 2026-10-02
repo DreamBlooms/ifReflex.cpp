@@ -33,6 +33,7 @@ struct canvas_question {
     // {"true","false"}; for score these are the ordered level keys.
     std::vector<std::string> keys;
     std::vector<std::string> labels; // token text for each key (defaults to keys)
+    std::vector<std::string> descs;  // per-option description (criteria value), shown in the prompt
     json legend;
     // Staged scheduling (djev): answered after these question ids, and only when
     // each ask_if dependency's answer is among its allowed values.

@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "ifreflex/diffusion_core.hpp"
+#include "ifreflex/prompt.hpp"
 
 struct llama_model;
 struct llama_context;
@@ -38,6 +39,9 @@ struct diffusion_runtime {
     int mask_id = -1;      // LLaDA mask token (>=0 when the arch is mask-seeded)
     int canvas_len = 0;    // DiffusionGemma fixed canvas length (0 when none)
     bool shift_logits = false;
+    // Label wording for this arch: DiffusionGemma reads djev labels, LLaDA reads
+    // letters (its training habit). Set at load from the arch.
+    label_style labels = label_style::djev;
     std::string name;
 
     ~diffusion_runtime();
@@ -56,6 +60,16 @@ struct diffusion_backend {
 
     // Fixed text prepended to the answer template (may be empty).
     virtual std::string scaffold_head(const diffusion_runtime & rt) const = 0;
+
+    // Render the prompt that precedes the answer canvas. The default is a flat
+    // "instructions + state + reply format" block; a chat-template arch (e.g.
+    // DiffusionGemma) overrides it to wrap the schema in a system turn and the
+    // state in a user turn, which is what the reference djev-dev does and what
+    // keeps a long state from drifting.
+    virtual std::string build_prompt(const diffusion_runtime & rt,
+                                     const std::string & instructions,
+                                     const std::string & state_text,
+                                     const std::string & prior_context) const;
 
     // Run `steps` forward passes over the seeded canvas for one (perm, sample)
     // draw and record the restricted label read for every question slot.

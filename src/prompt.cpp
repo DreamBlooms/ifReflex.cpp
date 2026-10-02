@@ -126,12 +126,26 @@ std::string label_style_to_string(label_style style) {
     return style == label_style::djev ? "djev" : "letters";
 }
 
-std::vector<std::string> answer_labels(question_kind kind, size_t n) {
+std::vector<std::string> answer_labels(question_kind kind, size_t n, label_style style) {
+    if (style == label_style::letters) {
+        // reflex / SemIf parity: every option is a letter code, regardless of kind.
+        static const std::string letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        std::vector<std::string> out;
+        out.reserve(n);
+        for (char c : letters) { if (out.size() >= n) break; out.push_back(std::string(1, c)); }
+        for (char a : letters) {
+            for (char b : letters) {
+                if (out.size() >= n) break;
+                out.push_back(std::string{a, b});
+            }
+        }
+        if (out.size() < n) throw std::invalid_argument("too many options for single-token labels");
+        return out;
+    }
     if (kind == question_kind::noul) {
-        // djev-dev words yes/no, bound to the answer keys {"true","false"} by
-        // position: labels[0] <-> keys[0] ("true") and labels[1] <-> keys[1]
-        // ("false"), so label "yes" means true and "no" means false.
-        return {"yes", "no"};
+        // djev-dev order ["no","yes"], bound to keys {"false","true"} by position:
+        // "no" <-> false, "yes" <-> true.
+        return {"no", "yes"};  // djev order, aligned to keys {"false","true"}
     }
     if (kind == question_kind::score) {
         // djev-dev labels: 0-based digit strings ("0","1",...), one per level,
@@ -504,7 +518,7 @@ std::vector<branch> build_branches(const prompt_format & fmt,
             if (fmt.labels == label_style::djev && kind != question_kind::choice) {
                 const size_t key_i = (size_t) std::distance(
                     keys.begin(), std::find(keys.begin(), keys.end(), order[i]));
-                label = answer_labels(kind, keys.size())[key_i];
+                label = answer_labels(kind, keys.size(), label_style::djev)[key_i];
             } else {
                 label.assign(1, letters[i]);
             }

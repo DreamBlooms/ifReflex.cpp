@@ -81,6 +81,11 @@ void runtime_load(diffusion_runtime & rt, const diffusion_options & opts) {
     if (llama_model_meta_val_str(rt.model, "diffusion.shift_logits", shift_str, sizeof(shift_str)) >= 0)
         rt.shift_logits = (shift_str[0] == 't' || shift_str[0] == '1');
 
+    // Label wording follows the arch: DiffusionGemma (fixed canvas) reads djev
+    // labels (yes/no, 0..n-1, letters) which a text backbone answers well;
+    // LLaDA (mask-token) reads letters, matching its training habit.
+    rt.labels = rt.canvas_len > 0 ? label_style::djev : label_style::letters;
+
     char meta[256] = {0};
     const int got = llama_model_meta_val_str(rt.model, "general.name", meta, sizeof(meta));
     rt.name = (got > 0 && meta[0]) ? std::string(meta) : opts.model.filename().string();
@@ -161,7 +166,7 @@ json diffusion_engine::predict(const json & request) {
     qs.reserve(questions.size());
     for (auto it = questions.begin(); it != questions.end(); ++it) {
         canvas_question cq;
-        parse_question(it.key(), it.value(), cq);
+        parse_question(p->rt.vocab, it.key(), it.value(), cq, p->rt.labels);
         qs.push_back(std::move(cq));
     }
 
