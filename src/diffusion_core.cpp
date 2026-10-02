@@ -37,22 +37,7 @@ std::vector<llama_token> tokenize_text(const llama_vocab * vocab, const std::str
     return out;
 }
 
-std::vector<std::string> label_codes(size_t n) {
-    static const std::string letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    std::vector<std::string> out;
-    out.reserve(n);
-    for (char c : letters) { if (out.size() >= n) break; out.push_back(std::string(1, c)); }
-    for (char a : letters) {
-        for (char b : letters) {
-            if (out.size() >= n) break;
-            out.push_back(std::string{a, b});
-        }
-    }
-    if (out.size() < n) throw std::invalid_argument("too many options for single-token labels");
-    return out;
-}
-
-void parse_question(const llama_vocab * vocab, const std::string & qid, const json & q,
+void parse_question(const llama_vocab * /*vocab*/, const std::string & qid, const json & q,
                     canvas_question & out, label_style style) {
     out.qid = qid;
     const std::string type = q.at("type").get<std::string>();
@@ -99,32 +84,10 @@ void parse_question(const llama_vocab * vocab, const std::string & qid, const js
     }
 
     // Project each key onto a single-token canvas label, djev-style: noul uses
-    // the natural words no/yes, score uses 0-based digit strings, and choice
-    // uses letter codes. A text-backed diffusion model places far more mass on
-    // natural words / digits than on arbitrary letters, so the label wording
-    // matters as much as the readout. Keys stay as the answer keys (noul
-    // true/false, score 0-based index) and are unmapped here.
+    // the natural words no/yes, score uses the digit strings, and choice uses
+    // letter codes. Keys stay as the answer keys (noul true/false, score
+    // 0-based index) and are unmapped here.
     out.labels = answer_labels(out.kind, out.keys.size(), style);
-    // A text-backed diffusion model often outputs the option *name* itself
-    // (e.g. " courier") for a choice rather than a letter code when the name is
-    // a single token; on letters the restricted readout collapses to noise
-    // (label_mass ~1e-22). For a choice only, when every option name (" " + key)
-    // is a single token, use those names as the labels so the read matches the
-    // model's natural output. noul keeps its djev words (no/yes) and score its
-    // digit strings: applying names there would replace a trained label with an
-    // arbitrary token (noul keys are true/false, not the answer words).
-    if (vocab && style == label_style::djev && out.kind == question_kind::choice) {
-        std::vector<std::string> names;
-        bool all_single = !out.keys.empty();
-        for (const auto & key : out.keys) {
-            const std::string tok = " " + key;
-            const std::vector<llama_token> ids =
-                tokenize_text(vocab, tok, /*add_special=*/false, /*parse_special=*/true);
-            if (ids.size() != 1) { all_single = false; break; }
-            names.push_back(tok);
-        }
-        if (all_single) out.labels = names;
-    }
 
     // Staged scheduling fields (djev depends_on / ask_if / alone).
     if (q.contains("depends_on") && q.at("depends_on").is_array())

@@ -29,11 +29,6 @@ namespace ifreflex {
 std::vector<llama_token> tokenize_text(const llama_vocab * vocab, const std::string & text,
                                       bool add_special, bool parse_special);
 
-// Single-token label codes (djev-dev CHOICE_LABELS): A..Z then AA, AB, ... Every
-// answer slot occupies exactly one canvas token regardless of the display key's
-// length. Throws when more options are requested than codes exist.
-std::vector<std::string> label_codes(size_t n);
-
 // Parse one question's criteria into (keys, labels, legend) and its staged
 // scheduling fields. `keys` are the answer keys to_answer reports; `labels` are
 // the single-token codes each key is projected onto.
