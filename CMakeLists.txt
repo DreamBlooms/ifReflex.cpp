@@ -7,7 +7,7 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# Pinned llama.cpp tree vendored under third_party/llama.cpp (release v0.4.1).
+# Pinned llama.cpp tree vendored under third_party/llama.cpp (release v0.5.0).
 set(LLAMA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/llama.cpp" CACHE PATH "llama.cpp checkout")
 if(NOT EXISTS "${LLAMA_DIR}/CMakeLists.txt")
     message(FATAL_ERROR
