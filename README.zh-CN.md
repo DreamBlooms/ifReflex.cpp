@@ -331,6 +331,11 @@ REFLEX_SRC=~/reflex/src SEMIF_SRC=~/SemIf-OpenJev/src RWKV_SRC=~/rwkv-jev-like/s
   （问题目录 + JSON 字段引导、`noul` 自然槽位）与完整词 fork 读出。
 * [AnyJev](https://github.com/nokia-applied-research/AnyJev)（Apache-2.0）——置换合并的
   几何平均、规范化选项排列、批量标签先验，以及闭式 L1 温度拟合。
+* [djev](https://github.com/mmastrac/djev) 与
+  [djev-dev](https://github.com/Davipar/djev-dev)（Apache-2.0）——DiffusionGemma 的单步
+  结构化读出（预置并固定的答案画布、逐槽位 logit 分布）、`label: option` 回复格式，以及
+  `depends_on` / `ask_if` 的分层问题编排；另见
+  [reflex #6](https://github.com/kshetrajna12/reflex/pull/6)（DiffusionGemma 实验性支持）。
 * [llama.cpp](https://github.com/ggml-org/llama.cpp)（MIT）——推理运行时。
 * HTTP 传输层改编自 [laya.cpp](https://github.com/lkarlslund/laya.cpp)（MIT）。
 

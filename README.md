@@ -375,6 +375,12 @@ REFLEX_SRC=~/reflex/src SEMIF_SRC=~/SemIf-OpenJev/src RWKV_SRC=~/rwkv-jev-like/s
 * [AnyJev](https://github.com/nokia-applied-research/AnyJev) (Apache-2.0) — the
   log-mean permutation merge, canonical option listing, batch label prior, and
   the closed-form L1 temperature fit.
+* [djev](https://github.com/mmastrac/djev) and
+  [djev-dev](https://github.com/Davipar/djev-dev) (Apache-2.0) — the DiffusionGemma
+  one-step structured read (seeded/pinned answer canvas, per-slot logit
+  distribution), the `label: option` reply format, and staged `depends_on` /
+  `ask_if` question execution. Also [reflex #6](https://github.com/kshetrajna12/reflex/pull/6)
+  (experimental DiffusionGemma support).
 * [llama.cpp](https://github.com/ggml-org/llama.cpp) (MIT) — inference runtime.
 * HTTP transport adapted from [laya.cpp](https://github.com/lkarlslund/laya.cpp)
   (MIT).

@@ -12,6 +12,9 @@ cmake_install.cmake
 *.safetensors
 *.f32
 
+# Local benchmark results
+/RESULTS-*.md
+
 # Python
 .venv/
 __pycache__/
