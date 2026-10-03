@@ -69,7 +69,7 @@ add_executable(ifreflex-cli
     src/diffusion_core.cpp
     src/diffusion_driver.cpp
     src/diffusion_gemma.cpp
-    src/llada.cpp
+    src/llada_moe.cpp
     src/prompt.cpp
     src/readout.cpp
     src/sys.cpp
@@ -102,7 +102,7 @@ add_executable(smoke_diffusion
     src/diffusion_core.cpp
     src/diffusion_driver.cpp
     src/diffusion_gemma.cpp
-    src/llada.cpp
+    src/llada_moe.cpp
     src/prompt.cpp
     src/readout.cpp
     src/sys.cpp

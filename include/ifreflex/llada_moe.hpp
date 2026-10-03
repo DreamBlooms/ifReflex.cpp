@@ -7,9 +7,11 @@
 
 namespace ifreflex {
 
-// The LLaDA backend. Constructed by make_backend when the model is an
-// llada-moe / llada mask-token diffusion arch (mask_id >= 0, no canvas_length).
-struct llada_backend : diffusion_backend {
+// The LLaDA-MoE backend. Constructed by make_backend when the model is an
+// llada-moe mask-token diffusion arch (mask_id >= 0, no canvas_length). The
+// hand-built prompt is LLaDA-MoE-Instruct's role-tagged template, so this is
+// specific to the MoE Instruct checkpoint, not dense LLaDA.
+struct llada_moe_backend : diffusion_backend {
     std::string scaffold_head(const diffusion_runtime & rt) const override;
     std::string build_prompt(const diffusion_runtime & rt,
                              const std::string & instructions,

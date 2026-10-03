@@ -4,7 +4,7 @@
 // LLaDA-MoE, ...): question parsing, staged scheduling, single-token label
 // projection, whole-template slot location, restricted label readout, and the
 // permutation x noise merge into a canvas_result. The per-arch denoise drivers
-// live in diffusion_gemma.cpp / llada.cpp and only have to produce a raw
+// live in diffusion_gemma.cpp / llada_moe.cpp and only have to produce a raw
 // per-slot label distribution; this core turns those into answers.
 //
 // Numeric semantics reused from ifreflex/readout.hpp (softmax / confidence /

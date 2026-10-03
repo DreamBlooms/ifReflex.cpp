@@ -12,7 +12,7 @@
 // Verified on the JevBench original tier: samples=permutations=2 and =1 produce
 // identical per-item reads in a 6x slower run. Use the defaults (1, 1).
 
-#include "ifreflex/llada.hpp"
+#include "ifreflex/llada_moe.hpp"
 
 #include <cmath>
 #include <random>
@@ -23,13 +23,13 @@
 
 namespace ifreflex {
 
-std::string llada_backend::scaffold_head(const diffusion_runtime &) const {
+std::string llada_moe_backend::scaffold_head(const diffusion_runtime &) const {
     // LLaDA has no Gemma thought-channel convention; the template is just the
     // answer rows. No pinned scaffold.
     return "";
 }
 
-std::string llada_backend::build_prompt(const diffusion_runtime & rt,
+std::string llada_moe_backend::build_prompt(const diffusion_runtime & rt,
                                         const std::string & instructions,
                                         const std::string & state_text,
                                         const std::string & prior_context) const {
@@ -59,7 +59,7 @@ std::string llada_backend::build_prompt(const diffusion_runtime & rt,
            "<role>ASSISTANT</role>";
 }
 
-void llada_backend::denoise(diffusion_runtime & rt,
+void llada_moe_backend::denoise(diffusion_runtime & rt,
                             const std::string & /*head*/,
                             const std::vector<llama_token> & prompt_tokens,
                             const std::vector<llama_token> & base,

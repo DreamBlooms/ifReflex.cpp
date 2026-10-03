@@ -13,7 +13,7 @@
 //                     transfer.
 //
 // This header declares the hooks and the shared runner implemented in
-// diffusion_driver.cpp. The arch backends live in diffusion_gemma.cpp / llada.cpp.
+// diffusion_driver.cpp. The arch backends live in diffusion_gemma.cpp / llada_moe.cpp.
 #pragma once
 
 #include <string>

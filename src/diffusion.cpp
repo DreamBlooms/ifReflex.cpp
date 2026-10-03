@@ -5,7 +5,7 @@
 // canvas or LLaDA mask-token), and exposes the Jev /v1/systemone contract. The
 // model-independent read core is in diffusion_core.cpp; the shared denoise loop
 // is in diffusion_driver.cpp; the arch denoise drivers are in
-// diffusion_gemma.cpp / llada.cpp.
+// diffusion_gemma.cpp / llada_moe.cpp.
 //
 // Accuracy mechanisms (from mmastrac/djev structured_server.py and
 // kshetrajna12/reflex PR #6 src/reflex/backends/diffusion.py):
@@ -25,7 +25,7 @@
 #include "ifreflex/diffusion_core.hpp"
 #include "ifreflex/diffusion_driver.hpp"
 #include "ifreflex/diffusion_gemma.hpp"
-#include "ifreflex/llada.hpp"
+#include "ifreflex/llada_moe.hpp"
 #include "ifreflex/sys.hpp"
 #include "llama.h"
 
@@ -110,7 +110,7 @@ diffusion_backend * make_backend(const diffusion_runtime & rt) {
     // DiffusionGemma declares a fixed canvas_length and drives SC/PKV; LLaDA is a
     // mask-token model (mask_id >= 0, no canvas_length).
     if (rt.canvas_len > 0) return new gemma_backend();
-    if (rt.mask_id >= 0) return new llada_backend();
+    if (rt.mask_id >= 0) return new llada_moe_backend();
     throw std::runtime_error("unsupported diffusion model (no canvas_length or mask token)");
 }
 
