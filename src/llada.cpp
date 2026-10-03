@@ -5,6 +5,12 @@
 // label tokens is the structured decision read. There is no fixed canvas, no
 // self-conditioning, and no prompt-KV phase machine -- LLaDA ignores those
 // DiffusionGemma-only calls -- so this backend is a plain batched llama_decode.
+//
+// samples / permutations are inert here: a mask-token MDM forward is already
+// deterministic (the seed is the mask id, not random noise) and option order does
+// not reach the answer-slot row, so every (perm, sample) draw is byte-identical.
+// Verified on the JevBench original tier: samples=permutations=2 and =1 produce
+// identical per-item reads in a 6x slower run. Use the defaults (1, 1).
 
 #include "ifreflex/llada.hpp"
 
