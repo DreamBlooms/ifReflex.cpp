@@ -252,6 +252,8 @@ int main(int argc, char ** argv) {
             dopts.samples = opts.diffusion_samples;
             dopts.cfg_scale = opts.diffusion_cfg;
             dopts.permutations = opts.permutations;
+            if (opts.labels == "letters") dopts.labels = ifreflex::diffusion_options::label_mode::letters;
+            else if (opts.labels == "djev") dopts.labels = ifreflex::diffusion_options::label_mode::djev;
             ifreflex::diffusion_engine deng(dopts);
             std::cerr << "backend: " << deng.backend_name() << " on " << deng.model_name()
                       << " (canvas " << deng.canvas_length() << ")\n";

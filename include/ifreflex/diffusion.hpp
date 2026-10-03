@@ -59,6 +59,11 @@ struct diffusion_options {
     // default: it biases the read toward one label (noul collapses to "yes"), and
     // the reference djev runs without it. Kept as an opt-in.
     double cfg_scale = 0.0;
+    // Option-label wording override. `auto` (default) follows the arch: djev
+    // words for a fixed-canvas model (DiffusionGemma), letter codes for a
+    // mask-token model (LLaDA). Force `letters` or `djev` to test either.
+    enum class label_mode { automatic, letters, djev };
+    label_mode labels = label_mode::automatic;
 };
 
 // One question's restricted read: probabilities over `keys` (renormalised),

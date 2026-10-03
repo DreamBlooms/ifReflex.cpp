@@ -83,8 +83,13 @@ void runtime_load(diffusion_runtime & rt, const diffusion_options & opts) {
 
     // Label wording follows the arch: DiffusionGemma (fixed canvas) reads djev
     // labels (yes/no, 0..n-1, letters) which a text backbone answers well;
-    // LLaDA (mask-token) reads letters, matching its training habit.
-    rt.labels = rt.canvas_len > 0 ? label_style::djev : label_style::letters;
+    // LLaDA (mask-token) reads letters, matching its training habit. The
+    // label_mode override forces one for experiments.
+    switch (opts.labels) {
+        case diffusion_options::label_mode::letters: rt.labels = label_style::letters; break;
+        case diffusion_options::label_mode::djev:    rt.labels = label_style::djev;    break;
+        default: rt.labels = rt.canvas_len > 0 ? label_style::djev : label_style::letters;
+    }
 
     char meta[256] = {0};
     const int got = llama_model_meta_val_str(rt.model, "general.name", meta, sizeof(meta));
