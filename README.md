@@ -280,6 +280,20 @@ CMake configure time, so a submodule at the pinned tag is enough.
 `cpp-httplib` are vendored under `third_party/`, so the build stays
 self-contained and cross-compilable.
 
+### Windows (cross-compile)
+
+From Ubuntu / Debian, MinGW-w64 cross-compiles a self-contained
+`ifreflex-cli.exe` (no extra DLLs):
+
+```sh
+sudo apt-get install mingw-w64
+scripts/build_windows.sh
+```
+
+`cmake/mingw-w64-x86_64.cmake` sets the toolchain and `-DIFREFLEX_STATIC=ON`
+statically links llama.cpp and the GCC runtime, so the result runs without
+shipping DLLs.
+
 ### GPU
 
 The default build is CPU only. CUDA, Vulkan, ROCm (HIP), and Metal are optional

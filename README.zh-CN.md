@@ -247,6 +247,19 @@ llama.cpp 以子模块形式固定在 `v0.5.0` 发行版，位于 `third_party/l
 固定 tag 即可。`-DLLAMA_DIR=...` 可指定其他 checkout。`nlohmann/json` 与
 `cpp-httplib` 已置于 `third_party/`，因此构建完全自包含，且便于交叉编译。
 
+### Windows（交叉编译）
+
+在 Ubuntu / Debian 上，可用 MinGW-w64 交叉编译出独立的 `ifreflex-cli.exe`
+（无需额外 DLL）：
+
+```sh
+sudo apt-get install mingw-w64
+scripts/build_windows.sh
+```
+
+`cmake/mingw-w64-x86_64.cmake` 负责设置工具链，`-DIFREFLEX_STATIC=ON` 会静态链接
+llama.cpp 与 GCC 运行时，因此产物可直接运行、无需附带 DLL。
+
 ### GPU
 
 默认构建仅支持 CPU。CUDA、Vulkan、ROCm（HIP）与 Metal 为可选后端，在配置阶段启用其一：
