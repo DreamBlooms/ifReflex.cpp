@@ -225,10 +225,12 @@ build/ifreflex-cli --model M.gguf --calibration cal.json --input requests.jsonl
 
 ## 构建
 
-需要 CMake 3.14+ 与支持 C++20 的编译器。`scripts/build.sh` 会完成配置与构建（额外参数会
-转交给 CMake，例如指定 GPU 后端）：
+需要 CMake 3.14+ 与支持 C++20 的编译器。在 Ubuntu / Debian 上，`scripts/setup.sh`
+会安装依赖，随后 `scripts/build.sh` 完成配置与构建（额外参数会转交给 CMake，例如指定
+GPU 后端）：
 
 ```sh
+sudo scripts/setup.sh
 scripts/build.sh
 ```
 
@@ -253,7 +255,7 @@ llama.cpp 以子模块形式固定在 `v0.5.0` 发行版，位于 `third_party/l
 （无需额外 DLL）：
 
 ```sh
-sudo apt-get install mingw-w64
+sudo scripts/setup.sh --with-mingw
 scripts/build_windows.sh
 ```
 

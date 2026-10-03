@@ -255,10 +255,13 @@ you want to see the difference.
 
 ## Build
 
-Requires CMake 3.14+ and a C++20 compiler. `scripts/build.sh` configures and
-builds the CLI (extra CMake arguments are forwarded, e.g. a GPU backend):
+Requires CMake 3.14+ and a C++20 compiler. On Ubuntu / Debian
+`scripts/setup.sh` installs the dependencies, then `scripts/build.sh`
+configures and builds the CLI (extra CMake arguments are forwarded, e.g. a GPU
+backend):
 
 ```sh
+sudo scripts/setup.sh
 scripts/build.sh
 ```
 
@@ -286,7 +289,7 @@ From Ubuntu / Debian, MinGW-w64 cross-compiles a self-contained
 `ifreflex-cli.exe` (no extra DLLs):
 
 ```sh
-sudo apt-get install mingw-w64
+sudo scripts/setup.sh --with-mingw
 scripts/build_windows.sh
 ```
 
