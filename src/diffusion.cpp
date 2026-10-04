@@ -98,7 +98,16 @@ void runtime_load(diffusion_runtime & rt, const diffusion_options & opts) {
     const int want_ctx = opts.ctx_size > 0 ? opts.ctx_size : (4096 + rt.canvas_len);
     llama_context_params cparams = llama_context_default_params();
     cparams.n_ctx = (uint32_t) want_ctx;
-    cparams.n_ubatch = (uint32_t) want_ctx;
+    // DiffusionGemma with the prompt-KV cache prefills the prompt in n_ubatch
+    // chunks and decodes only the short canvas, so the compute buffer does not
+    // need to span the whole context (n_ubatch = ctx cost ~4x the RAM for no
+    // speed benefit). The no-cache unified forward and LLaDA decode prompt +
+    // canvas in one non-causal batch, which requires n_ubatch >= n_tokens.
+    const bool unified_only = opts.cfg_scale > 0.0 || std::getenv("IFREFLEX_NO_PKV") != nullptr;
+    const bool chunked_prefill = rt.canvas_len > 0 && !unified_only;
+    cparams.n_ubatch = (uint32_t)(chunked_prefill
+        ? std::min(want_ctx, std::max(opts.n_batch, 512))
+        : want_ctx);
     cparams.n_batch = (uint32_t) std::max(opts.n_batch, want_ctx);
     cparams.n_threads = opts.threads > 0 ? opts.threads : physical_core_count();
     cparams.n_threads_batch = cparams.n_threads;
