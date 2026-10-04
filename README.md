@@ -164,6 +164,12 @@ memory to load, while LLaDA-MoE is a 7B model (1.4B active, ~8 GB). Options are
 projected onto single-token letter codes (`A`, `B`, … , `AA`, `AB`, …), so any
 option *name* may be as long as you like.
 
+The diffusion build compiles the compute kernels with `-march=native`
+(`GGML_NATIVE=ON`), so on a modern x86 CPU it already uses AVX2/AVX-512 and FMA
+with no extra flags. On the cached DiffusionGemma path the prompt is prefilled in
+chunks, so the compute buffer is sized to `n_batch` rather than the whole context
+(~4x smaller at a large `--ctx`) at no speed cost.
+
 ## Prompt styles
 
 `--prompt` selects the layout, which is how **reflex / SemIf / RWKV-Jev are

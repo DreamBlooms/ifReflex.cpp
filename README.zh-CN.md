@@ -142,6 +142,10 @@ build/ifreflex-cli --diffusion --server --port 8080 \
 无需 GPU——26B 的 DiffusionGemma 加载约需 24 GB 内存，而 LLaDA-MoE 为 7B 模型（激活 1.4B，约 8 GB）。
 选项名被映射为单 token 字母码（`A`、`B`……、`AA`、`AB`……），因此选项名本身可以任意长。
 
+扩散构建以 `-march=native`（`GGML_NATIVE=ON`）编译计算内核，在现代 x86 CPU 上会自动启用
+AVX2/AVX-512 与 FMA，无需额外参数。走缓存的 DiffusionGemma 路径会对提示词分块预填充，因此
+计算缓冲区按 `n_batch` 而非整个上下文分配（大 `--ctx` 下约省至 1/4），且不损失速度。
+
 ## 提示词风格
 
 `--prompt` 选择渲染版式，也是 **reflex / SemIf / RWKV-Jev 的切换开关**：
