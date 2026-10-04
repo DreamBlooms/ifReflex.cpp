@@ -95,7 +95,13 @@ void runtime_load(diffusion_runtime & rt, const diffusion_options & opts) {
     const int got = llama_model_meta_val_str(rt.model, "general.name", meta, sizeof(meta));
     rt.name = (got > 0 && meta[0]) ? std::string(meta) : opts.model.filename().string();
 
-    const int want_ctx = opts.ctx_size > 0 ? opts.ctx_size : (4096 + rt.canvas_len);
+    // Default context: 8192 tokens (plus the canvas). The old flat 4096 rejected
+    // states the model was trained to handle (LLaDA-MoE trains at 8192;
+    // DiffusionGemma long states exceed 4352). With the cached DiffusionGemma
+    // path a large context is free (chunked prefill); the unified/CFG path sizes
+    // n_ubatch = ctx, so pass --ctx to raise it further only when needed.
+    const int default_ctx = 8192;
+    const int want_ctx = opts.ctx_size > 0 ? opts.ctx_size : (default_ctx + rt.canvas_len);
     llama_context_params cparams = llama_context_default_params();
     cparams.n_ctx = (uint32_t) want_ctx;
     // DiffusionGemma with the prompt-KV cache prefills the prompt in n_ubatch
