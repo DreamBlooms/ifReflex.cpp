@@ -123,6 +123,14 @@ joint canvas read per level, and later levels are conditioned on earlier answers
 via a prefilled `Answers so far` context. A question whose `ask_if` dependency
 falls outside its allowed values is skipped and answered `null`.
 
+Each request costs `samples x permutations` reads. For DiffusionGemma the prompt
+is prefilled **once** into the model's prompt-KV store and every read then decodes
+only the answer canvas, so a long state is not re-encoded per draw (a fixed-seed
+A/B on a 4.8k-token state ran 163s -> 54s). LLaDA reads are deterministic and
+option-order independent, so its `samples` / `permutations` are collapsed to a
+single read automatically (bit-identical output, ~2.2x faster); pass them only for
+DiffusionGemma.
+
 ```json
 {"state": {"message": "The login page throws 500s for everyone."},
  "questions": {

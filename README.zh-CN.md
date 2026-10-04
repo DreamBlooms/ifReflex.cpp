@@ -111,6 +111,12 @@ build/ifreflex-cli --diffusion --server --port 8080 \
 一致：问题按依赖关系分层，每层执行一次联合画布读；后续层通过预填充的 `Answers so far`
 上下文，以前序答案为条件。当 `ask_if` 的依赖取值不在允许集合内时，该问题被跳过，答案记为 `null`。
 
+每个请求的总读次数为 `samples x permutations`。DiffusionGemma 会把提示词一次性预填充进
+模型的 prompt-KV 存储，之后每次读只解码答案画布，因此长 state 不会在每次抽样时重复编码
+（固定种子实测：4.8k token 的 state 由 163s 降至 54s）。LLaDA 的读是确定性的、与选项顺序
+无关，其 `samples` / `permutations` 会自动收敛为单次读（输出逐字节一致，约 2.2x 加速）；
+这两个参数只对 DiffusionGemma 有意义。
+
 ```json
 {"state": {"message": "登录页对所有人返回 500。"},
  "questions": {
