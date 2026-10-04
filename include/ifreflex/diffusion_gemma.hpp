@@ -14,6 +14,9 @@ struct gemma_backend : diffusion_backend {
                              const std::string & instructions,
                              const std::string & state_text,
                              const std::string & prior_context) const override;
+    void prepare(diffusion_runtime & rt,
+                 const std::vector<llama_token> & prompt_tokens) const override;
+    void finish(diffusion_runtime & rt) const override;
     void denoise(diffusion_runtime & rt,
                  const std::string & head,
                  const std::vector<llama_token> & prompt_tokens,

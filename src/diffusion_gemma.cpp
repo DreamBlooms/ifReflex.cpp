@@ -57,6 +57,52 @@ std::string gemma_backend::build_prompt(const diffusion_runtime & rt,
            "<turn|>\n<|turn>model\n";
 }
 
+void gemma_backend::prepare(diffusion_runtime & rt,
+                            const std::vector<llama_token> & prompt_tokens) const {
+    // CFG runs an extra unconditional forward with the prompt masked, which cannot
+    // read a cached store; leave those requests on the unified path.
+    if ((float) rt.opts.cfg_scale > 0.0f) return;
+    const int n_input = (int) prompt_tokens.size();
+    if (n_input <= 0 || rt.canvas_len <= 0) return;
+
+    // PREFILL the prompt once into the prompt-KV store (causal), so every draw
+    // below DECODEs only the canvas. The reference driver chunks to n_ubatch; our
+    // context already sizes n_ubatch for the whole request, so this is one chunk.
+    llama_batch batch = llama_batch_init(std::max(1, n_input), 0, 1);
+    llama_set_causal_attn(rt.ctx, false);
+    const int U = std::max(1, (int) llama_n_ubatch(rt.ctx));
+    bool ok = true;
+    for (int s = 0; s < n_input && ok; s += U) {
+        const int u = std::min(U, n_input - s);
+        llama_diffusion_set_phase(rt.model, /*PKV_PREFILL=*/1, n_input, s);
+        batch.n_tokens = u;
+        for (int i = 0; i < u; ++i) {
+            batch.token[i] = prompt_tokens[(size_t)(s + i)];
+            batch.pos[i] = s + i;
+            batch.n_seq_id[i] = 1;
+            batch.seq_id[i][0] = 0;
+            // PREFILL logits are unused; flag one row per chunk so a capped
+            // n_outputs reserves a row.
+            batch.logits[i] = (i == u - 1) ? 1 : 0;
+        }
+        if (llama_decode(rt.ctx, batch) != 0) ok = false;
+    }
+    llama_batch_free(batch);
+    if (!ok) {
+        llama_diffusion_set_phase(rt.model, /*PKV_UNIFIED=*/0, 0, 0);
+        throw std::runtime_error("gemma prompt prefill failed");
+    }
+    rt.pkv_ready = true;
+    rt.pkv_n_input = n_input;
+}
+
+void gemma_backend::finish(diffusion_runtime & rt) const {
+    if (rt.pkv_ready) {
+        llama_diffusion_set_phase(rt.model, /*PKV_UNIFIED=*/0, 0, 0);
+        rt.pkv_ready = false;
+    }
+}
+
 void gemma_backend::denoise(diffusion_runtime & rt,
                             const std::string & /*head*/,
                             const std::vector<llama_token> & prompt_tokens,
@@ -100,14 +146,17 @@ void gemma_backend::denoise(diffusion_runtime & rt,
         if (slot_pos[qi] >= 0 && slot_pos[qi] < width)
             cur[(size_t) slot_pos[qi]] = (llama_token) vocab_dist(rng); // independent noise per slot
 
-    // Full sequence [prompt | canvas] in one batch, as the reference driver does.
-    const int total = n_input + width;
-    const int logit_off = n_input; // canvas rows start here in the logits buffer
+    // Cached path (prepare() prefilled the prompt): DECODE only the canvas, whose
+    // rows are packed at logit row 0. Otherwise the unified [prompt | canvas]
+    // forward, with canvas rows starting at n_input.
+    const bool cached = rt.pkv_ready && cfg_scale <= 0.0f;
+    const int total = cached ? width : n_input + width;
+    const int logit_off = cached ? 0 : n_input;
     // Tell the graph where this request's canvas starts. The GGUF's baked
     // canvas_length is only an upper bound; the request's actual region split is
     // P = total - width. Without this the graph splits at the baked value and a
     // short request lands P at 0, decoding the whole prompt as canvas.
-    llama_diffusion_set_canvas(rt.model, width);
+    if (!cached) llama_diffusion_set_canvas(rt.model, width);
     // SC uploads the previous step's canvas logits [n_vocab, width] (the graph's
     // canvas rows, set above).
     std::vector<float> sc_buffer((size_t) width * n_vocab, 0.0f);
@@ -120,7 +169,7 @@ void gemma_backend::denoise(diffusion_runtime & rt,
         batch.n_tokens = total;
         for (int i = 0; i < total; ++i) {
             batch.token[i] = seq[(size_t) i];
-            batch.pos[i] = i;
+            batch.pos[i] = cached ? (rt.pkv_n_input + i) : i;
             batch.n_seq_id[i] = 1;
             batch.seq_id[i][0] = 0;
             batch.logits[i] = 1;
@@ -148,8 +197,13 @@ void gemma_backend::denoise(diffusion_runtime & rt,
         const float temp_inv = 1.0f / t;
 
         std::vector<llama_token> seq((size_t) total, 0);
-        for (int i = 0; i < n_input; ++i) seq[(size_t) i] = prompt_tokens[(size_t) i];
-        for (int i = 0; i < width; ++i) seq[(size_t)(n_input + i)] = cur[(size_t) i];
+        if (cached) {
+            for (int i = 0; i < width; ++i) seq[(size_t) i] = cur[(size_t) i];
+            llama_diffusion_set_phase(rt.model, /*PKV_DECODE=*/2, rt.pkv_n_input, 0);
+        } else {
+            for (int i = 0; i < n_input; ++i) seq[(size_t) i] = prompt_tokens[(size_t) i];
+            for (int i = 0; i < width; ++i) seq[(size_t)(n_input + i)] = cur[(size_t) i];
+        }
 
         llama_diffusion_set_sc(rt.model, sc_buffer.data(),
                                step == 0 ? 0.0f : 1.0f, prev_temp_inv, true);

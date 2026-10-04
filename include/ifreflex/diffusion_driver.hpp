@@ -39,6 +39,10 @@ struct diffusion_runtime {
     int mask_id = -1;      // LLaDA mask token (>=0 when the arch is mask-seeded)
     int canvas_len = 0;    // DiffusionGemma fixed canvas length (0 when none)
     bool shift_logits = false;
+    // DiffusionGemma prompt-KV state: set by prefill() and consulted by denoise()
+    // to decide between the cached DECODE phase and the no-cache UNIFIED forward.
+    bool pkv_ready = false;
+    int pkv_n_input = 0;
     // Label wording for this arch: DiffusionGemma reads djev labels, LLaDA reads
     // letters (its training habit). Set at load from the arch.
     label_style labels = label_style::djev;
@@ -71,6 +75,13 @@ struct diffusion_backend {
                                      const std::string & state_text,
                                      const std::string & prior_context) const;
 
+    // Optional one-time setup before the (permutation, sample) draws. The default
+    // is a no-op. DiffusionGemma overrides it to PREFILL the prompt into its
+    // prompt-KV store so the draws only decode the short canvas; without it every
+    // draw re-decodes the whole prompt.
+    virtual void prepare(diffusion_runtime & rt,
+                         const std::vector<llama_token> & prompt_tokens) const;
+
     // Run `steps` forward passes over the seeded canvas for one (perm, sample)
     // draw and record the restricted label read for every question slot.
     virtual void denoise(diffusion_runtime & rt,
@@ -84,6 +95,10 @@ struct diffusion_backend {
                          std::vector<std::vector<std::vector<float>>> & branch_logits,
                          std::vector<std::vector<double>> & branch_mass,
                          std::vector<std::vector<double>> & branch_argmax) = 0;
+
+    // Release any per-request state prepare() acquired (DiffusionGemma resets the
+    // phase to UNIFIED so the next request cannot read a stale store).
+    virtual void finish(diffusion_runtime & rt) const;
 };
 
 // Select the arch backend for a loaded model (Gemma fixed-canvas vs LLaDA mask).

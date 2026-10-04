@@ -47,6 +47,11 @@ std::string diffusion_backend::build_prompt(const diffusion_runtime & /*rt*/,
     return prompt_text;
 }
 
+void diffusion_backend::prepare(diffusion_runtime & /*rt*/,
+                                const std::vector<llama_token> & /*prompt_tokens*/) const {}
+
+void diffusion_backend::finish(diffusion_runtime & /*rt*/) const {}
+
 std::vector<canvas_result> run_canvas(diffusion_runtime & rt,
                                       diffusion_backend & backend,
                                       const std::string & state_text,
@@ -135,6 +140,15 @@ std::vector<canvas_result> run_canvas(diffusion_runtime & rt,
     std::vector<std::vector<int>> label_ids(nq);
     for (size_t qi = 0; qi < nq; ++qi)
         for (llama_token t : slot_ids[qi]) label_ids[qi].push_back((int) t);
+
+    // One-time prompt prefill into the arch's prompt-KV store (DiffusionGemma),
+    // so each draw below decodes only the canvas. No-op for mask-token arches.
+    backend.prepare(rt, prompt_tokens);
+    struct finish_guard {
+        diffusion_backend & b;
+        diffusion_runtime & r;
+        ~finish_guard() { b.finish(r); }
+    } guard{backend, rt};
 
     for (int perm = 0; perm < permutations; ++perm) {
         // Rotate each question's option order (reflex position-bias removal).
