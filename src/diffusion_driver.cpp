@@ -130,8 +130,12 @@ std::vector<canvas_result> run_canvas(diffusion_runtime & rt,
         throw std::invalid_argument("prompt + canvas exceeds the context");
 
     // ---- 3. Permutations (reflex) x noise samples (djev). ----
-    const int samples = std::max(1, rt.opts.samples);
-    const int permutations = std::max(1, rt.opts.permutations);
+    // A mask-token arch (LLaDA) yields the same draw for every (perm, sample):
+    // the seed is the fixed mask token and the read is option-order independent.
+    // Collapse to one draw then, so the defaults do not pay 4x for nothing.
+    const bool repeats_identical = backend.repeats_are_identical();
+    const int samples = repeats_identical ? 1 : std::max(1, rt.opts.samples);
+    const int permutations = repeats_identical ? 1 : std::max(1, rt.opts.permutations);
 
     std::vector<std::vector<std::vector<float>>> branch_logits(nq);
     std::vector<std::vector<double>> branch_mass(nq);

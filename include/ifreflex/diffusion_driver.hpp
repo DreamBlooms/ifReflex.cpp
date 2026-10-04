@@ -99,6 +99,12 @@ struct diffusion_backend {
     // Release any per-request state prepare() acquired (DiffusionGemma resets the
     // phase to UNIFIED so the next request cannot read a stale store).
     virtual void finish(diffusion_runtime & rt) const;
+
+    // True when every (permutation, sample) repeat would produce a byte-identical
+    // draw, so the outer loop runs one draw instead of samples*permutations.
+    // DiffusionGemma seeds each slot with independent noise (false); LLaDA seeds
+    // with the fixed mask token and its read is option-order independent (true).
+    virtual bool repeats_are_identical() const { return false; }
 };
 
 // Select the arch backend for a loaded model (Gemma fixed-canvas vs LLaDA mask).

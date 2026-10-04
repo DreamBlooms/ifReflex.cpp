@@ -17,6 +17,9 @@ struct llada_moe_backend : diffusion_backend {
                              const std::string & instructions,
                              const std::string & state_text,
                              const std::string & prior_context) const override;
+    // A mask-seeded LLaDA forward is deterministic and option-order independent,
+    // so every (perm, sample) repeat reads the same values; run one draw.
+    bool repeats_are_identical() const override { return true; }
     void denoise(diffusion_runtime & rt,
                  const std::string & head,
                  const std::vector<llama_token> & prompt_tokens,

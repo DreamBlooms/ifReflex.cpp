@@ -62,6 +62,8 @@ void gemma_backend::prepare(diffusion_runtime & rt,
     // CFG runs an extra unconditional forward with the prompt masked, which cannot
     // read a cached store; leave those requests on the unified path.
     if ((float) rt.opts.cfg_scale > 0.0f) return;
+    // Escape hatch for A/B against the no-cache unified forward.
+    if (std::getenv("IFREFLEX_NO_PKV")) return;
     const int n_input = (int) prompt_tokens.size();
     if (n_input <= 0 || rt.canvas_len <= 0) return;
 
