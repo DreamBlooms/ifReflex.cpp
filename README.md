@@ -168,7 +168,9 @@ The diffusion build compiles the compute kernels with `-march=native`
 (`GGML_NATIVE=ON`), so on a modern x86 CPU it already uses AVX2/AVX-512 and FMA
 with no extra flags. On the cached DiffusionGemma path the prompt is prefilled in
 chunks, so the compute buffer is sized to `n_batch` rather than the whole context
-(~4x smaller at a large `--ctx`) at no speed cost.
+(~4x smaller at a large `--ctx`) at no speed cost. The context defaults to 8192
+tokens plus the canvas; `--ctx N` raises it (the cached path makes a larger
+context nearly free, the unified / CFG path does not).
 
 ## Prompt styles
 

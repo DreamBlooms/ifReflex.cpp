@@ -144,7 +144,8 @@ build/ifreflex-cli --diffusion --server --port 8080 \
 
 扩散构建以 `-march=native`（`GGML_NATIVE=ON`）编译计算内核，在现代 x86 CPU 上会自动启用
 AVX2/AVX-512 与 FMA，无需额外参数。走缓存的 DiffusionGemma 路径会对提示词分块预填充，因此
-计算缓冲区按 `n_batch` 而非整个上下文分配（大 `--ctx` 下约省至 1/4），且不损失速度。
+计算缓冲区按 `n_batch` 而非整个上下文分配（大 `--ctx` 下约省至 1/4），且不损失速度。上下文
+默认 8192 token 加画布，`--ctx N` 可调大（缓存路径下扩容几乎无成本，unified / CFG 路径则不然）。
 
 ## 提示词风格
 
