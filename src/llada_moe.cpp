@@ -29,6 +29,15 @@ std::string llada_moe_backend::scaffold_head(const diffusion_runtime &) const {
     return "";
 }
 
+std::string llada_moe_backend::canvas_tail(const diffusion_runtime &) const {
+    // Training sees the assistant turn as "answer<|role_end|>"; under bidirectional
+    // attention the answer slot attends to that terminator on its right. Without
+    // it the readout sits in a context the model never saw and the slot logits
+    // shift. IFREFLEX_NO_TERMINATOR drops it for A/B.
+    if (std::getenv("IFREFLEX_NO_TERMINATOR")) return "";
+    return "<|role_end|>";
+}
+
 std::string llada_moe_backend::build_prompt(const diffusion_runtime & rt,
                                         const std::string & instructions,
                                         const std::string & state_text,

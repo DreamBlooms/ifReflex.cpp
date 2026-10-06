@@ -151,9 +151,13 @@ const std::vector<std::string> & question_labels(const canvas_question & q) {
 
 std::string build_template_text(const std::string & head,
                                 const std::vector<canvas_question> & questions,
-                                const std::vector<std::string> & labels) {
-    // djev-dev encode_answer: scaffold + "index: label" rows joined by newlines,
-    // with the same ": " separator as the prompt's reply format.
+                                const std::vector<std::string> & labels,
+                                const std::string & tail) {
+    // djev-dev encode_answer: scaffold + "index: label" rows, one per line, then
+    // the turn terminator. The ": " separator matches the prompt's reply format.
+    // Each row keeps its trailing newline: on LLaDA-MoE dropping it before the
+    // terminator cost 5 hard-tier items (33/111 vs 38/111), so the model expects
+    // "label\n<|role_end|>", not "label<|role_end|>".
     std::string text = head;
     for (size_t i = 0; i < questions.size(); ++i) {
         text += std::to_string(i);
@@ -161,6 +165,7 @@ std::string build_template_text(const std::string & head,
         text += labels[i];
         text += "\n";
     }
+    text += tail;
     return text;
 }
 
@@ -168,7 +173,8 @@ void locate_slots(const llama_vocab * vocab, const std::string & head,
                   const std::vector<canvas_question> & questions,
                   const std::vector<llama_token> & base,
                   std::vector<int> & slot_pos,
-                  std::vector<std::vector<llama_token>> & slot_ids) {
+                  std::vector<std::vector<llama_token>> & slot_ids,
+                  const std::string & tail) {
     const size_t nq = questions.size();
     slot_pos.assign(nq, -1);
     slot_ids.assign(nq, {});
@@ -178,7 +184,7 @@ void locate_slots(const llama_vocab * vocab, const std::string & head,
     for (size_t i = 0; i < nq; ++i) labels0[i] = question_labels(questions[i]).at(0);
 
     auto ids_for = [&](const std::vector<std::string> & labels) {
-        return tokenize_text(vocab, build_template_text(head, questions, labels),
+        return tokenize_text(vocab, build_template_text(head, questions, labels, tail),
                              /*add_special=*/false, /*parse_special=*/true);
     };
 

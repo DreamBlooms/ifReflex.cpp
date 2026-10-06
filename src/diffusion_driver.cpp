@@ -62,16 +62,17 @@ std::vector<canvas_result> run_canvas(diffusion_runtime & rt,
 
     // ---- 1. Template + slot location (whole-template re-tokenisation). ----
     const std::string head = backend.scaffold_head(rt);
+    const std::string tail = backend.canvas_tail(rt);
     std::vector<std::string> labels0(nq);
     for (size_t i = 0; i < nq; ++i) labels0[i] = question_labels(questions[i]).at(0);
 
     const std::vector<llama_token> base =
-        tokenize_text(rt.vocab, build_template_text(head, questions, labels0),
+        tokenize_text(rt.vocab, build_template_text(head, questions, labels0, tail),
                       /*add_special=*/false, /*parse_special=*/true);
 
     std::vector<int> slot_pos;
     std::vector<std::vector<llama_token>> slot_ids;
-    locate_slots(rt.vocab, head, questions, base, slot_pos, slot_ids);
+    locate_slots(rt.vocab, head, questions, base, slot_pos, slot_ids, tail);
 
     // The driver's canvas width is the template length (+ optional tail slot).
     // Arch backends may round / pad internally; slot_pos indices are absolute

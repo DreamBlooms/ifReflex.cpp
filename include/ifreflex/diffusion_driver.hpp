@@ -65,6 +65,15 @@ struct diffusion_backend {
     // Fixed text prepended to the answer template (may be empty).
     virtual std::string scaffold_head(const diffusion_runtime & rt) const = 0;
 
+    // Fixed text appended after the answer rows, closing the turn the way the
+    // model saw it in training, so the answer slot attends to a terminator on its
+    // right under bidirectional attention (may be empty). LLaDA-MoE returns its
+    // <|role_end|>; DiffusionGemma pins its own turn-close token in denoise.
+    virtual std::string canvas_tail(const diffusion_runtime & rt) const {
+        (void) rt;
+        return std::string();
+    }
+
     // Render the prompt that precedes the answer canvas. The default is a flat
     // "instructions + state + reply format" block; a chat-template arch (e.g.
     // DiffusionGemma) overrides it to wrap the schema in a system turn and the

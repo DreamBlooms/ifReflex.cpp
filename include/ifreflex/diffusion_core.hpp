@@ -52,21 +52,25 @@ const std::vector<std::string> & question_labels(const canvas_question & q);
 
 // The answer template as text: one row "<qid>: <label>\n" per question, with the
 // per-question label substituted at its own row. `head` is prepended verbatim
-// (the arch-specific scaffold, possibly empty).
+// (the arch-specific scaffold, possibly empty); `tail` is appended verbatim after
+// the last row (the turn terminator the model saw in training, possibly empty).
 std::string build_template_text(const std::string & head,
                                 const std::vector<canvas_question> & questions,
-                                const std::vector<std::string> & labels);
+                                const std::vector<std::string> & labels,
+                                const std::string & tail = std::string());
 
 // Locate each question's answer slot by whole-template re-tokenisation (never
 // guessed offsets): substitute a non-base label per question and diff against
 // `base`, which must change exactly one token at a consistent position. Fills
 // `slot_pos[i]` (canvas index of question i's slot) and `slot_ids[i]` (each
-// declared label's token id at that position). Throws on any ambiguity.
+// declared label's token id at that position). Throws on any ambiguity. `tail`
+// must match the one passed to build_template_text for `base`.
 void locate_slots(const llama_vocab * vocab, const std::string & head,
                   const std::vector<canvas_question> & questions,
                   const std::vector<llama_token> & base,
                   std::vector<int> & slot_pos,
-                  std::vector<std::vector<llama_token>> & slot_ids);
+                  std::vector<std::vector<llama_token>> & slot_ids,
+                  const std::string & tail = std::string());
 
 // Per-position logits row for a canvas slot. `shift_logits` models predict token
 // i from the logits at row i-1; ifreflex indexes row == slot unless the model

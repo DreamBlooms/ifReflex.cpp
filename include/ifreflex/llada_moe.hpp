@@ -13,6 +13,7 @@ namespace ifreflex {
 // specific to the MoE Instruct checkpoint, not dense LLaDA.
 struct llada_moe_backend : diffusion_backend {
     std::string scaffold_head(const diffusion_runtime & rt) const override;
+    std::string canvas_tail(const diffusion_runtime & rt) const override;
     std::string build_prompt(const diffusion_runtime & rt,
                              const std::string & instructions,
                              const std::string & state_text,
