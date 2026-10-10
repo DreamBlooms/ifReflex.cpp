@@ -116,6 +116,8 @@ LLaDA2.x controls: a confidence threshold for mask-to-token transfer, early
 stop on EOS, and suppression of the Levenshtein edit tokens (DELETE/INSERT),
 plus feeding the active block its filled prefix only.
 
+Adapted from upstream https://github.com/ggml-org/llama.cpp/pull/17454.
+
 Base: ${BASE_TAG} + patch 1/3 (also applies on the PR merge alone).
 
 ---

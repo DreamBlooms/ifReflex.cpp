@@ -139,7 +139,7 @@ build/ifreflex-cli --diffusion --server --port 8080 \
 抑制的思考通道，因此无需该脚手架。
 
 三种架构均依赖本仓库的 llama.cpp 扩散构建（DiffusionGemma 由 [#24423](https://github.com/ggml-org/llama.cpp/pull/24423)
-合入，LLaDA-MoE 已原生注册，LLaDA2.x 由 patch 3 加入）；原生 `llama-cli` / `llama-server` 尚不支持此类模型。CPU 即可运行，
+合入，LLaDA-MoE 已原生注册，LLaDA2.x 由 patch 3 加入，改编自上游 [#17454](https://github.com/ggml-org/llama.cpp/pull/17454)）；原生 `llama-cli` / `llama-server` 尚不支持此类模型。CPU 即可运行，
 无需 GPU——26B 的 DiffusionGemma 加载约需 24 GB 内存，而 LLaDA-MoE 为 7B 模型（激活 1.4B，约 8 GB）。
 选项名被映射为单 token 字母码（`A`、`B`……、`AA`、`AB`……），因此选项名本身可以任意长。
 
@@ -294,7 +294,7 @@ cmake --build build -j8
 
 llama.cpp 以子模块形式固定在 `v0.5.0` 发行版，位于 `third_party/llama.cpp`。扩散构建
 在此基础上叠加 `third_party/patches` 中的补丁（DiffusionGemma，即上游
-[#24423](https://github.com/ggml-org/llama.cpp/pull/24423)；每请求画布切分；以及 LLaDA2.x 支持）；
+[#24423](https://github.com/ggml-org/llama.cpp/pull/24423)；每请求画布切分；以及 LLaDA2.x 支持，改编自上游 [#17454](https://github.com/ggml-org/llama.cpp/pull/17454)）；
 `scripts/apply_patches.sh` 负责应用，并在 CMake 配置阶段自动执行，因此子模块停留在
 固定 tag 即可。`-DLLAMA_DIR=...` 可指定其他 checkout。`nlohmann/json` 与
 `cpp-httplib` 已置于 `third_party/`，因此构建完全自包含，且便于交叉编译。

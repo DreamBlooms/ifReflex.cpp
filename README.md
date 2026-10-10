@@ -159,8 +159,9 @@ suppress and needs no scaffold.
 
 These arches need this llama.cpp diffusion build (DiffusionGemma merged from
 [#24423](https://github.com/ggml-org/llama.cpp/pull/24423); LLaDA-MoE is already
-registered and LLaDA2.x is added by patch 3); the stock `llama-cli` /
-`llama-server` cannot drive these models.
+registered and LLaDA2.x is added by patch 3, adapted from upstream
+[#17454](https://github.com/ggml-org/llama.cpp/pull/17454)); the stock
+`llama-cli` / `llama-server` cannot drive these models.
 CPU works (no GPU required) — a 26B DiffusionGemma checkpoint wants ~24 GB of
 memory to load, while LLaDA-MoE is a 7B model (1.4B active, ~8 GB). Options are
 projected onto single-token letter codes (`A`, `B`, … , `AA`, `AB`, …), so any
@@ -337,7 +338,9 @@ llama.cpp is pinned to release `v0.5.0` under `third_party/llama.cpp`. The
 diffusion build is that base plus the patches in `third_party/patches`
 (DiffusionGemma, upstream
 [#24423](https://github.com/ggml-org/llama.cpp/pull/24423); a per-request canvas
-split; and LLaDA2.x support); `scripts/apply_patches.sh` applies them and runs automatically at
+split; and LLaDA2.x support, adapted from upstream
+[#17454](https://github.com/ggml-org/llama.cpp/pull/17454));
+`scripts/apply_patches.sh` applies them and runs automatically at
 CMake configure time, so a submodule at the pinned tag is enough.
 `-DLLAMA_DIR=...` points the build at another checkout. `nlohmann/json` and
 `cpp-httplib` are vendored under `third_party/`, so the build stays
