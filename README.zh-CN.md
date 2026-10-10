@@ -83,12 +83,13 @@ token 精确索引），因此重复出现的 state 可跳过 prefill；state �
 一份答案模板，其中固定文本全部钉死（pin），仅答案槽位保留为噪声，一步去噪后每个槽位即
 得到一个分布，该分布即为答案。
 
-目前支持两种扩散架构，加载时由 GGUF 自动判定，无需额外参数指定：
+目前支持三种扩散架构，加载时由 GGUF 自动判定，无需额外参数指定：
 
-| 架构 | 模型 | 槽位读出方式 |
+| arch | 模型 | 槽位读法 |
 | --- | --- | --- |
 | `diffusion-gemma` | [DiffusionGemma](https://huggingface.co/unsloth/diffusiongemma-26B-A4B-it-GGUF) | 固定长度画布，非答案文本全部钉死，自条件 + prompt-KV 相位 |
 | `llada-moe` | [LLaDA-MoE](https://huggingface.co/mradermacher/LLaDA-MoE-7B-A1B-Instruct-GGUF) | mask token 播种，对提示与答案行做一次非因果前向 |
+| `llada2` | [LLaDA2.2-mini](https://huggingface.co/DreamBlooms/LLaDA2.2-mini-GGUF) | 与 `llada-moe` 相同的 mask token 读法；LLaDA2.x 复用 BailingMoeV2 图 |
 
 启动时指定 `--diffusion`，并将模型换为对应架构的 GGUF：
 
@@ -137,8 +138,8 @@ build/ifreflex-cli --diffusion --server --port 8080 \
 开头并钉死，使模型判定思考已闭合，从而直接作答，而不先生成思维链。LLaDA-MoE 没有需要
 抑制的思考通道，因此无需该脚手架。
 
-两种架构均依赖本仓库的 llama.cpp 扩散构建（DiffusionGemma 由 [#24423](https://github.com/ggml-org/llama.cpp/pull/24423)
-合入，LLaDA-MoE 已原生注册）；原生 `llama-cli` / `llama-server` 尚不支持此类模型。CPU 即可运行，
+三种架构均依赖本仓库的 llama.cpp 扩散构建（DiffusionGemma 由 [#24423](https://github.com/ggml-org/llama.cpp/pull/24423)
+合入，LLaDA-MoE 已原生注册，LLaDA2.x 由 patch 3 加入）；原生 `llama-cli` / `llama-server` 尚不支持此类模型。CPU 即可运行，
 无需 GPU——26B 的 DiffusionGemma 加载约需 24 GB 内存，而 LLaDA-MoE 为 7B 模型（激活 1.4B，约 8 GB）。
 选项名被映射为单 token 字母码（`A`、`B`……、`AA`、`AB`……），因此选项名本身可以任意长。
 
@@ -293,7 +294,7 @@ cmake --build build -j8
 
 llama.cpp 以子模块形式固定在 `v0.5.0` 发行版，位于 `third_party/llama.cpp`。扩散构建
 在此基础上叠加 `third_party/patches` 中的补丁（DiffusionGemma，即上游
-[#24423](https://github.com/ggml-org/llama.cpp/pull/24423)，以及每请求画布切分）；
+[#24423](https://github.com/ggml-org/llama.cpp/pull/24423)；每请求画布切分；以及 LLaDA2.x 支持）；
 `scripts/apply_patches.sh` 负责应用，并在 CMake 配置阶段自动执行，因此子模块停留在
 固定 tag 即可。`-DLLAMA_DIR=...` 可指定其他 checkout。`nlohmann/json` 与
 `cpp-httplib` 已置于 `third_party/`，因此构建完全自包含，且便于交叉编译。

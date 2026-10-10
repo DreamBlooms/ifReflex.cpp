@@ -91,13 +91,14 @@ tokens per forward pass; if the canvas is seeded with an answer template whose
 fixed text is pinned and only the answer slots are left as noise, one denoise step
 gives a distribution over every slot. That distribution *is* the answer.
 
-Two diffusion architectures are supported. The backend is chosen automatically
+Three diffusion architectures are supported. The backend is chosen automatically
 from the GGUF at load — no flag selects it.
 
 | arch | model | how a slot is read |
 | --- | --- | --- |
 | `diffusion-gemma` | [DiffusionGemma](https://huggingface.co/unsloth/diffusiongemma-26B-A4B-it-GGUF) | fixed-length canvas, non-answer text pinned, self-conditioning + prompt-KV phases |
 | `llada-moe` | [LLaDA-MoE](https://huggingface.co/mradermacher/LLaDA-MoE-7B-A1B-Instruct-GGUF) | mask-token seeding, one non-causal forward over prompt + answer rows |
+| `llada2` | [LLaDA2.2-mini](https://huggingface.co/DreamBlooms/LLaDA2.2-mini-GGUF) | same mask-token read as `llada-moe`; LLaDA2.x reuses the BailingMoeV2 graph |
 
 Serve a diffusion GGUF with `--diffusion`:
 
@@ -156,9 +157,10 @@ model sees the thought channel as already open-and-closed and answers directly
 instead of writing a chain of thought first. LLaDA-MoE has no thought channel to
 suppress and needs no scaffold.
 
-Both arches need this llama.cpp diffusion build (DiffusionGemma merged from
+These arches need this llama.cpp diffusion build (DiffusionGemma merged from
 [#24423](https://github.com/ggml-org/llama.cpp/pull/24423); LLaDA-MoE is already
-registered); the stock `llama-cli` / `llama-server` cannot drive these models.
+registered and LLaDA2.x is added by patch 3); the stock `llama-cli` /
+`llama-server` cannot drive these models.
 CPU works (no GPU required) — a 26B DiffusionGemma checkpoint wants ~24 GB of
 memory to load, while LLaDA-MoE is a 7B model (1.4B active, ~8 GB). Options are
 projected onto single-token letter codes (`A`, `B`, … , `AA`, `AB`, …), so any
@@ -334,8 +336,8 @@ cmake --build build -j8
 llama.cpp is pinned to release `v0.5.0` under `third_party/llama.cpp`. The
 diffusion build is that base plus the patches in `third_party/patches`
 (DiffusionGemma, upstream
-[#24423](https://github.com/ggml-org/llama.cpp/pull/24423), and a per-request
-canvas split); `scripts/apply_patches.sh` applies them and runs automatically at
+[#24423](https://github.com/ggml-org/llama.cpp/pull/24423); a per-request canvas
+split; and LLaDA2.x support); `scripts/apply_patches.sh` applies them and runs automatically at
 CMake configure time, so a submodule at the pinned tag is enough.
 `-DLLAMA_DIR=...` points the build at another checkout. `nlohmann/json` and
 `cpp-httplib` are vendored under `third_party/`, so the build stays

@@ -1,0 +1,468 @@
+From: DreamBlooms <DreamBlooms@users.noreply.github.com>
+Subject: [PATCH 3/3] llada2: LLaDA2.x MoE diffusion support
+
+LLaDA2.x shares the BailingMoeV2 graph (same tensor names, grouped sigmoid MoE,
+shared experts, qk norm, partial rotary), so it only needs a new arch that is
+flagged as diffusion, the converter registration, and the mask-token /
+non-causal diffusion metadata. The block-diffusion sampler also gains the
+LLaDA2.x controls: a confidence threshold for mask-to-token transfer, early
+stop on EOS, and suppression of the Levenshtein edit tokens (DELETE/INSERT),
+plus feeding the active block its filled prefix only.
+
+Base: v0.5.0 + patch 1/3 (also applies on the PR merge alone).
+
+---
+diff --git a/common/arg.cpp b/common/arg.cpp
+index 50edd35ed..715582a8b 100644
+--- a/common/arg.cpp
++++ b/common/arg.cpp
+@@ -4497,6 +4497,22 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
+         string_format("add gumbel noise to the logits if temp > 0.0 (default: %s)", params.diffusion.add_gumbel_noise ? "true" : "false"),
+         [](common_params & params, const std::string & value) { params.diffusion.add_gumbel_noise = std::stof(value); }
+     ).set_examples({ LLAMA_EXAMPLE_DIFFUSION }));
++    add_opt(common_arg(
++        {"--diffusion-threshold"}, "F",
++        string_format("confidence threshold for transfer (default: %.2f)", (double) params.diffusion.threshold),
++        [](common_params & params, const std::string & value) { params.diffusion.threshold = std::stof(value); }
++    ).set_examples({ LLAMA_EXAMPLE_DIFFUSION }));
++    add_opt(common_arg(
++        {"--diffusion-eos-early-stop"},
++        string_format("enable early EOS termination (default: %s)", params.diffusion.eos_early_stop ? "true" : "false"),
++        [](common_params & params) { params.diffusion.eos_early_stop = true; }
++    ).set_examples({ LLAMA_EXAMPLE_DIFFUSION }));
++    add_opt(common_arg(
++        {"--diffusion-keep-edit-tokens"},
++        "do not suppress the LLaDA2.x Levenshtein edit tokens (DELETE/INSERT); they are suppressed by default "
++        "because this sampler does not apply the edit operations",
++        [](common_params & params) { params.diffusion.keep_edit_tokens = true; }
++    ).set_examples({ LLAMA_EXAMPLE_DIFFUSION }));
+     add_opt(common_arg(
+         {"--diffusion-eb"}, "MODE",
+         "entropy-bound decoder for canvas/block-diffusion models (DiffusionGemma): auto|on|off (default: auto)",
+diff --git a/common/common.h b/common/common.h
+index 96010cd8c..25127347f 100644
+--- a/common/common.h
++++ b/common/common.h
+@@ -416,6 +416,10 @@ struct common_params_diffusion {
+     float   cfg_scale     = 0;        // classifier-free guidance scale
+     bool    add_gumbel_noise = false; // add gumbel noise to the logits if temp > 0.0
+ 
++    float   threshold      = -1.0f;   // LLaDA2.x confidence threshold for mask-to-token transfer (<=0 disables)
++    bool    eos_early_stop = false;   // LLaDA2.x stop once EOS is written with all earlier slots filled
++    bool    keep_edit_tokens = false; // keep the LLaDA2.x Levenshtein edit tokens instead of suppressing them
++
+     // entropy-bound decoder (DiffusionGemma canvas models); params default to GGUF metadata, then reference
+     int32_t eb_mode          = 0;     // 0=auto (on for canvas models), 1=force on, 2=off
+     float   eb_t_min         = -1.0f; // <0 / <=0 -> not overridden on the command line
+diff --git a/conversion/__init__.py b/conversion/__init__.py
+index 7e39b86c0..8e8764bec 100644
+--- a/conversion/__init__.py
++++ b/conversion/__init__.py
+@@ -149,6 +149,7 @@ TEXT_MODEL_MAP: dict[str, str] = {
+     "LLaDAMoEModel": "llada",
+     "LLaDAMoEModelLM": "llada",
+     "LLaDAModelLM": "llada",
++    "LLaDA2MoeModelLM": "llada2",
+     "LLaMAForCausalLM": "llama",
+     "Lfm25AudioTokenizer": "lfm2",
+     "Lfm2BidirectionalModel": "lfm2",
+diff --git a/conversion/llada2.py b/conversion/llada2.py
+new file mode 100644
+index 000000000..b2af31ecf
+--- /dev/null
++++ b/conversion/llada2.py
+@@ -0,0 +1,77 @@
++from __future__ import annotations
++
++import json
++
++from .base import ModelBase, gguf
++from .bailingmoe import BailingMoeV2Model
++
++
++@ModelBase.register("LLaDA2MoeModelLM")
++@ModelBase.example("inclusionAI/LLaDA2.2-mini")
++class LLaDA2MoeModel(BailingMoeV2Model):
++    # LLaDA 2.x shares the BailingMoeV2 graph; it only adds mask-token,
++    # non-causal diffusion behaviour on top.
++    model_arch = gguf.MODEL_ARCH.LLADA2
++
++    def get_vocab_base(self) -> tuple[list[str], list[int], str]:
++        # The LLaDA2 tokenizer ships as custom remote code, so it must be
++        # loaded with trust_remote_code (same as the LLaDA 1.x converter).
++        tokens: list[str] = []
++        toktypes: list[int] = []
++
++        from transformers import AutoTokenizer
++        tokenizer = AutoTokenizer.from_pretrained(self.dir_model, trust_remote_code=True)
++
++        vocab_dict = tokenizer.get_vocab()
++        vocab_size = self.hparams.get("vocab_size", len(vocab_dict))
++        assert max(vocab_dict.values()) < vocab_size
++
++        tokpre = self.get_vocab_base_pre(tokenizer)
++
++        reverse_vocab = {id_: encoded_tok for encoded_tok, id_ in vocab_dict.items()}
++        added_vocab = tokenizer.get_added_vocab()
++
++        for i in range(vocab_size):
++            if i not in reverse_vocab:
++                tokens.append(f"[PAD{i}]")
++                toktypes.append(gguf.TokenType.UNUSED)
++            elif reverse_vocab[i] in added_vocab:
++                tokens.append(reverse_vocab[i])
++                if hasattr(tokenizer, "added_tokens_decoder") and i in tokenizer.added_tokens_decoder:
++                    if tokenizer.added_tokens_decoder[i].special:
++                        toktypes.append(gguf.TokenType.CONTROL)
++                    else:
++                        toktypes.append(gguf.TokenType.USER_DEFINED)
++                else:
++                    toktypes.append(gguf.TokenType.CONTROL)
++            else:
++                tokens.append(reverse_vocab[i])
++                toktypes.append(gguf.TokenType.NORMAL)
++
++        return tokens, toktypes, tokpre
++
++    def mask_token_id(self) -> int | None:
++        # LLaDA2.x releases differ: some expose the id in the config, others only the token.
++        if (mask_id := self.hparams.get("mask_token_id")) is not None:
++            return int(mask_id)
++        path = self.dir_model / "tokenizer_config.json"
++        if not path.is_file():
++            return None
++        with open(path, encoding="utf-8") as f:
++            cfg = json.load(f)
++        for tid, tok in cfg.get("added_tokens_decoder", {}).items():
++            if tok.get("content") == "<|mask|>":
++                return int(tid)
++        return None
++
++    def set_gguf_parameters(self):
++        super().set_gguf_parameters()
++        self.gguf_writer.add_causal_attention(False)
++        self.gguf_writer.add_diffusion_shift_logits(False)
++        if (mask_id := self.mask_token_id()) is not None:
++            self.gguf_writer.add_mask_token_id(mask_id)
++        # Levenshtein edit control tokens (DELETE/INSERT), consumed by the diffusion sampler.
++        if (delete_id := self.hparams.get("delete_token_id")) is not None:
++            self.gguf_writer.add_uint32("diffusion.delete_token_id", int(delete_id))
++        if (split_id := self.hparams.get("split_token_id")) is not None:
++            self.gguf_writer.add_uint32("diffusion.split_token_id", int(split_id))
+diff --git a/examples/diffusion/diffusion-cli.cpp b/examples/diffusion/diffusion-cli.cpp
+index 70487d728..69219ff2b 100644
+--- a/examples/diffusion/diffusion-cli.cpp
++++ b/examples/diffusion/diffusion-cli.cpp
+@@ -291,6 +291,19 @@ int main(int argc, char ** argv) {
+     diff_params.top_k            = params.sampling.top_k;
+     diff_params.visual_mode      = params.diffusion.visual_mode;
+     diff_params.add_gumbel_noise = params.diffusion.add_gumbel_noise;
++    diff_params.threshold      = params.diffusion.threshold;
++    diff_params.eos_early_stop = params.diffusion.eos_early_stop;
++    // LLaDA2.x exposes its Levenshtein edit tokens as GGUF metadata (see conversion/llada2.py).
++    // Suppress them unless the user opted out; without the edit ops they would leak into the text.
++    if (!params.diffusion.keep_edit_tokens) {
++        char edit_tok_str[32];
++        if (llama_model_meta_val_str(model, "diffusion.delete_token_id", edit_tok_str, sizeof(edit_tok_str)) >= 0) {
++            diff_params.delete_token_id = (llama_token) strtol(edit_tok_str, nullptr, 10);
++        }
++        if (llama_model_meta_val_str(model, "diffusion.split_token_id", edit_tok_str, sizeof(edit_tok_str)) >= 0) {
++            diff_params.split_token_id = (llama_token) strtol(edit_tok_str, nullptr, 10);
++        }
++    }
+ 
+     callback_data cb_data               = { &diff_params, vocab, 0, params.diffusion.visual_progress,
+                                             std::max(1, params.diffusion.visual_interval), 0, 0, 24, 80, 0 };
+diff --git a/examples/diffusion/diffusion.cpp b/examples/diffusion/diffusion.cpp
+index 73649473f..e9b6f4616 100644
+--- a/examples/diffusion/diffusion.cpp
++++ b/examples/diffusion/diffusion.cpp
+@@ -123,6 +123,8 @@ void diffusion_generate(llama_context *          ctx,
+ 
+     llama_set_causal_attn(ctx, false);
+ 
++    const llama_token eos_token_id = llama_vocab_eos(llama_model_get_vocab(model));
++
+     int32_t n_vocab = llama_vocab_n_tokens(llama_model_get_vocab(model));
+ 
+     std::vector<llama_token_data> candidates(n_vocab);
+@@ -185,7 +187,9 @@ void diffusion_generate(llama_context *          ctx,
+     int64_t total_time          = 0;
+     int64_t time_start          = ggml_time_us();
+ 
+-    for (int block_num = 0; block_num < num_blocks; block_num++) {
++    bool all_tokens_filled = false;
++
++    for (int block_num = 0; block_num < num_blocks && !all_tokens_filled; block_num++) {
+         int32_t block_start = (params.schedule == DIFFUSION_TRANSFER_SCHEDULE_BLOCK_BASED) ? n_input + block_num * params.block_length : 0;
+         int32_t block_end   = (params.schedule == DIFFUSION_TRANSFER_SCHEDULE_BLOCK_BASED) ?
+                                   std::min(n_input + (block_num + 1) * params.block_length, params.max_length) :
+@@ -212,8 +216,12 @@ void diffusion_generate(llama_context *          ctx,
+                 }
+             }
+ 
+-            // Setup batch
+-            for (int32_t i = 0; i < params.max_length; i++) {
++            // Block-based diffusion feeds only the filled prefix plus the active block, so the active
++            // block cannot attend to the still-masked future blocks.
++            const int32_t batch_n = (params.schedule == DIFFUSION_TRANSFER_SCHEDULE_BLOCK_BASED)
++                                        ? block_end : params.max_length;
++            batch.n_tokens = batch_n;
++            for (int32_t i = 0; i < batch_n; i++) {
+                 batch.token[i]     = output_tokens[i];
+                 batch.pos[i]       = i;
+                 batch.n_seq_id[i]  = 1;
+@@ -226,6 +234,9 @@ void diffusion_generate(llama_context *          ctx,
+                 llama_diffusion_set_sc(sc_model, sc_buffer.data(), global_step == 0 ? 0.0f : 1.0f, 1.0f, true);
+             }
+ 
++            // The prefix is re-decoded every step, so drop the stale KV for sequence 0 first.
++            llama_memory_seq_rm(llama_get_memory(ctx), 0, -1, -1);
++
+             float * logits = nullptr;
+ 
+             if (params.cfg_scale > 0.0f) {
+@@ -349,6 +360,13 @@ void diffusion_generate(llama_context *          ctx,
+                     if (params.suppress_mask_token) {
+                         candidates[params.mask_token_id].logit = -INFINITY;  // never reveal as mask
+                     }
++                    // Strip the Levenshtein edit tokens; the sampler does not apply the edit ops.
++                    if (params.delete_token_id != LLAMA_TOKEN_NULL) {
++                        candidates[params.delete_token_id].logit = -INFINITY;
++                    }
++                    if (params.split_token_id != LLAMA_TOKEN_NULL) {
++                        candidates[params.split_token_id].logit = -INFINITY;
++                    }
+ 
+                     llama_token_data_array cur_p = {
+                         candidates.data(),
+@@ -371,20 +389,66 @@ void diffusion_generate(llama_context *          ctx,
+ 
+                 if (transfer_count > 0) {
+                     if (params.alg_temp == 0.0f) {
+-                        std::partial_sort(confidences.begin(),
+-                                          confidences.begin() + std::min(transfer_count, (int32_t) confidences.size()),
+-                                          confidences.end(),
+-                                          [](const std::pair<float, int32_t> & a, const std::pair<float, int32_t> & b) {
+-                                              if (a.first != b.first) {
+-                                                  return a.first > b.first;
+-                                              }
+-                                              return a.second < b.second;
+-                                          });
++                        // Confidence-gated transfer: unmask the whole confident set when it meets the
++                        // schedule, else fall back to the top-k of the schedule.
++                        int32_t actual_transfer_count = std::min(transfer_count, (int32_t) confidences.size());
++                        if (params.threshold > 0.0f) {
++                            int32_t high_conf_count = 0;
++                            for (const auto & c : confidences) {
++                                if (c.first > params.threshold) {
++                                    high_conf_count++;
++                                }
++                            }
++                            if (high_conf_count >= transfer_count) {
++                                std::stable_partition(confidences.begin(), confidences.end(),
++                                    [t = params.threshold](const std::pair<float, int32_t> & item) {
++                                        return item.first > t;
++                                    });
++                                actual_transfer_count = high_conf_count;
++                            } else {
++                                std::partial_sort(confidences.begin(),
++                                                  confidences.begin() + std::min(transfer_count, (int32_t) confidences.size()),
++                                                  confidences.end(),
++                                                  [](const std::pair<float, int32_t> & a, const std::pair<float, int32_t> & b) {
++                                                      if (a.first != b.first) {
++                                                          return a.first > b.first;
++                                                      }
++                                                      return a.second < b.second;
++                                                  });
++                            }
++                        } else {
++                            std::partial_sort(confidences.begin(),
++                                              confidences.begin() + std::min(transfer_count, (int32_t) confidences.size()),
++                                              confidences.end(),
++                                              [](const std::pair<float, int32_t> & a, const std::pair<float, int32_t> & b) {
++                                                  if (a.first != b.first) {
++                                                      return a.first > b.first;
++                                                  }
++                                                  return a.second < b.second;
++                                              });
++                        }
+ 
+-                        for (int32_t i = 0; i < std::min(transfer_count, (int32_t) confidences.size()); i++) {
+-                            int32_t mask_idx   = confidences[i].second;
+-                            int32_t pos        = mask_positions[mask_idx];
+-                            output_tokens[pos] = sampled_tokens[mask_idx];
++                        actual_transfer_count = std::min(actual_transfer_count, (int32_t) confidences.size());
++                        for (int32_t i = 0; i < actual_transfer_count; i++) {
++                            int32_t     mask_idx = confidences[i].second;
++                            int32_t     pos      = mask_positions[mask_idx];
++                            llama_token tok      = sampled_tokens[mask_idx];
++                            output_tokens[pos]   = tok;
++
++                            if (params.eos_early_stop && tok == eos_token_id) {
++                                bool all_filled_before_eos = true;
++                                for (int32_t j = n_input; j < pos; j++) {
++                                    if (output_tokens[j] == params.mask_token_id) {
++                                        all_filled_before_eos = false;
++                                        break;
++                                    }
++                                }
++                                if (all_filled_before_eos) {
++                                    n_generated       = pos + 1 - n_input;
++                                    all_tokens_filled = true;
++                                    break;
++                                }
++                            }
+                         }
+                     } else {
+                         conf_candidates.clear();
+@@ -431,7 +495,28 @@ void diffusion_generate(llama_context *          ctx,
+     llama_sampler_free(sampler);
+     llama_sampler_free(dist_sampler);
+ 
+-    n_generated = params.max_length;
++    // Final EOS scan (the transfer-time check can miss a token written in a later slot).
++    if (params.eos_early_stop && !all_tokens_filled) {
++        for (int32_t i = n_input; i < params.max_length; i++) {
++            if (output_tokens[i] == eos_token_id) {
++                bool all_filled = true;
++                for (int32_t j = n_input; j < i; j++) {
++                    if (output_tokens[j] == params.mask_token_id) {
++                        all_filled = false;
++                        break;
++                    }
++                }
++                if (all_filled) {
++                    n_generated       = i + 1 - n_input;
++                    all_tokens_filled = true;
++                    break;
++                }
++            }
++        }
++    }
++    if (!all_tokens_filled) {
++        n_generated = params.max_length;
++    }
+ }
+ 
+ // Entropy-bound denoiser for DiffusionGemma-style canvas models (see diffusion.h). The canvas is
+diff --git a/examples/diffusion/diffusion.h b/examples/diffusion/diffusion.h
+index a7f305e29..b8bc8fdc7 100644
+--- a/examples/diffusion/diffusion.h
++++ b/examples/diffusion/diffusion.h
+@@ -51,6 +51,13 @@ struct diffusion_params {
+     bool    add_gumbel_noise = false;  // Add gumbel noise to the logits if temp > 0.0
+ 
+     int32_t max_length = 0;            // Maximum sequence length
++
++    // LLaDA2.x sampling controls: confidence-gated mask-to-token transfer, optional early stop on
++    // EOS, and suppression of the Levenshtein edit tokens (DELETE/INSERT) the sampler does not apply.
++    float       threshold       = -1.0f;  // unmask every position above this confidence (<= 0 disables)
++    bool        eos_early_stop  = false;   // stop once EOS lands with every earlier slot filled
++    llama_token delete_token_id = LLAMA_TOKEN_NULL;
++    llama_token split_token_id  = LLAMA_TOKEN_NULL;
+ };
+ 
+ void diffusion_generate(llama_context *          ctx,
+diff --git a/gguf-py/gguf/constants.py b/gguf-py/gguf/constants.py
+index 68807c5c5..f268685f0 100644
+--- a/gguf-py/gguf/constants.py
++++ b/gguf-py/gguf/constants.py
+@@ -620,6 +620,7 @@ class MODEL_ARCH(IntEnum):
+     SMALLTHINKER     = auto()
+     LLADA            = auto()
+     LLADA_MOE        = auto()
++    LLADA2           = auto()
+     SEED_OSS         = auto()
+     GROVEMOE         = auto()
+     APERTUS          = auto()
+@@ -1384,6 +1385,7 @@ MODEL_ARCH_NAMES: dict[MODEL_ARCH, str] = {
+     MODEL_ARCH.SMALLTHINKER:     "smallthinker",
+     MODEL_ARCH.LLADA:            "llada",
+     MODEL_ARCH.LLADA_MOE:        "llada-moe",
++    MODEL_ARCH.LLADA2:           "llada2",
+     MODEL_ARCH.SEED_OSS:         "seed_oss",
+     MODEL_ARCH.GROVEMOE:         "grovemoe",
+     MODEL_ARCH.APERTUS:          "apertus",
+@@ -4577,6 +4579,29 @@ MODEL_TENSORS: dict[MODEL_ARCH, list[MODEL_TENSOR]] = {
+         MODEL_TENSOR.NEXTN_SHARED_HEAD_NORM,
+         MODEL_TENSOR.LAYER_OUT_NORM,
+     ],
++    MODEL_ARCH.LLADA2: [
++        MODEL_TENSOR.TOKEN_EMBD,
++        MODEL_TENSOR.OUTPUT_NORM,
++        MODEL_TENSOR.OUTPUT,
++        MODEL_TENSOR.ATTN_NORM,
++        MODEL_TENSOR.ATTN_Q_NORM,
++        MODEL_TENSOR.ATTN_K_NORM,
++        MODEL_TENSOR.ATTN_QKV,
++        MODEL_TENSOR.ATTN_OUT,
++        MODEL_TENSOR.FFN_GATE_INP,
++        MODEL_TENSOR.FFN_EXP_PROBS_B,
++        MODEL_TENSOR.FFN_NORM,
++        MODEL_TENSOR.FFN_GATE,
++        MODEL_TENSOR.FFN_DOWN,
++        MODEL_TENSOR.FFN_UP,
++        MODEL_TENSOR.FFN_GATE_EXP,
++        MODEL_TENSOR.FFN_DOWN_EXP,
++        MODEL_TENSOR.FFN_UP_EXP,
++        MODEL_TENSOR.FFN_GATE_SHEXP,
++        MODEL_TENSOR.FFN_DOWN_SHEXP,
++        MODEL_TENSOR.FFN_UP_SHEXP,
++        MODEL_TENSOR.LAYER_OUT_NORM,
++    ],
+     MODEL_ARCH.BAILINGMOE3: [
+         MODEL_TENSOR.TOKEN_EMBD,
+         MODEL_TENSOR.OUTPUT_NORM,
+diff --git a/src/llama-arch.cpp b/src/llama-arch.cpp
+index c5b727cd5..80a366aa9 100644
+--- a/src/llama-arch.cpp
++++ b/src/llama-arch.cpp
+@@ -132,6 +132,7 @@ static const std::map<llm_arch, const char *> LLM_ARCH_NAMES = {
+     { LLM_ARCH_SMALLTHINKER,     "smallthinker"     },
+     { LLM_ARCH_LLADA,            "llada"            },
+     { LLM_ARCH_LLADA_MOE,        "llada-moe"        },
++    { LLM_ARCH_LLADA2,           "llada2"           },
+     { LLM_ARCH_SEED_OSS,         "seed_oss"         },
+     { LLM_ARCH_GROVEMOE,         "grovemoe"         },
+     { LLM_ARCH_APERTUS,          "apertus"          },
+@@ -1117,6 +1118,7 @@ bool llm_arch_is_diffusion(const llm_arch & arch) {
+         case LLM_ARCH_DREAM:
+         case LLM_ARCH_LLADA:
+         case LLM_ARCH_LLADA_MOE:
++        case LLM_ARCH_LLADA2:
+         case LLM_ARCH_RND1:
+         case LLM_ARCH_DIFFUSION_GEMMA:
+             return true;
+diff --git a/src/llama-arch.h b/src/llama-arch.h
+index c60e9d759..ebdaacbae 100644
+--- a/src/llama-arch.h
++++ b/src/llama-arch.h
+@@ -137,6 +137,7 @@ enum llm_arch {
+     LLM_ARCH_SMALLTHINKER,
+     LLM_ARCH_LLADA,
+     LLM_ARCH_LLADA_MOE,
++    LLM_ARCH_LLADA2,
+     LLM_ARCH_SEED_OSS,
+     LLM_ARCH_GROVEMOE,
+     LLM_ARCH_APERTUS,
+diff --git a/src/llama-model.cpp b/src/llama-model.cpp
+index e791cf2b6..76dfff4d0 100644
+--- a/src/llama-model.cpp
++++ b/src/llama-model.cpp
+@@ -265,6 +265,7 @@ static llama_model * llama_model_mapping(llm_arch arch, const llama_model_params
+         case LLM_ARCH_BAILINGMOE:
+             return new llama_model_bailingmoe(params);
+         case LLM_ARCH_BAILINGMOE2:
++        case LLM_ARCH_LLADA2:
+             return new llama_model_bailingmoe2(params);
+         case LLM_ARCH_BAILINGMOE3:
+             return new llama_model_bailingmoe3(params);
+@@ -3025,6 +3026,7 @@ llama_rope_type llama_model_rope_type(const llama_model * model) {
+         case LLM_ARCH_EXAONE_MOE:
+         case LLM_ARCH_MINICPM3:
+         case LLM_ARCH_BAILINGMOE2:
++        case LLM_ARCH_LLADA2:
+         case LLM_ARCH_DOTS1:
+         case LLM_ARCH_HUNYUAN_MOE:
+         case LLM_ARCH_JAIS2:

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Apply the ifreflex patches onto the pinned llama.cpp submodule.
 #
-# The submodule is pinned to upstream v0.5.0. The diffusion build needs two
-# patches on top (DiffusionGemma, PR #24423, and the per-request canvas split
-# ifreflex adds); they live in third_party/patches and are regenerated with
-# scripts/gen_patches.sh. Safe to run before every build:
+# The submodule is pinned to upstream v0.5.0. The diffusion build needs three
+# patches on top (DiffusionGemma, PR #24423; the per-request canvas split
+# ifreflex adds; and LLaDA2.x support); they live in third_party/patches and are
+# regenerated with scripts/gen_patches.sh. Safe to run before every build:
 #   * if the series applies forward, apply it;
 #   * else if the sentinel from the last patch is present, it is already applied;
 #   * else the tracked tree is reset to the pinned commit and the series applied
