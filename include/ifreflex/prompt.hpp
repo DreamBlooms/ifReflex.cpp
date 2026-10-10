@@ -23,7 +23,7 @@ namespace ifreflex {
 
 using json = nlohmann::ordered_json;
 
-enum class prompt_style { reflex_markdown, reflex_compact, semif, rwkv_jev };
+enum class prompt_style { reflex_markdown, reflex_compact, semif, rwkv_jev, custom };
 
 // How each option is projected onto a single-token label to read:
 //   letters  every option is a letter code (A, B, ...), reflex / SemIf style.
@@ -62,6 +62,25 @@ std::string style_to_string(prompt_style style);
 
 // Letters used as single-token option labels: A..Z for reflex, A..P for SemIf.
 const std::string & style_letters(prompt_style style);
+
+// A user-supplied prompt layout (`prompt_style::custom`). The four sections are
+// assembled around the shared state and read like the built-in styles:
+//   system  the system message text (empty uses a generic decision instruction)
+//   prefix  the shared body, before the per-question text; `{state}` is the state
+//   branch  the per-question body; `{question}` and `{options}` are substituted
+//   option  one option line; `{label}` and `{text}` are substituted
+// The chat wrapper still comes from `--template`, and the assistant turn opens
+// after `branch`. A file with no `@@` section markers is taken as `branch` alone.
+struct custom_template {
+    std::string system;
+    std::string prefix = "{state}";
+    std::string branch = "{question}\n{options}";
+    std::string option = "{label}. {text}";
+};
+
+// Parse a `--prompt-file` custom template (`@@system` / `@@prefix` / `@@branch` /
+// `@@option` section headers). Missing sections keep their defaults.
+custom_template parse_custom_template(const std::string & text);
 
 // Max option count for a style (single-token letter budget).
 size_t style_max_options(prompt_style style);
@@ -102,6 +121,8 @@ struct prompt_format {
     // Option-label projection. `letters` (default) keeps reflex / SemIf parity;
     // `djev` reads natural yes/no, 1..n and letter codes instead (see label_style).
     label_style labels = label_style::letters;
+    // The layout for `prompt_style::custom`; ignored by the built-in styles.
+    custom_template custom;
 };
 
 // Render a state / instructions / criteria value. Strings pass through; structured

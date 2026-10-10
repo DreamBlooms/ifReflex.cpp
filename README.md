@@ -183,12 +183,54 @@ switched**:
 | `reflex_compact` | one JSON object `{"state","question","options":[{letter,text}]}` | letter | up to 26 |
 | `semif` | one JSON object `{"evidence","criterion","options":[{letter,description}]}` | letter | up to 16 |
 | `rwkv_jev` | question catalog in the system prefix + per-question JSON field lead; `noul` uses a `Q: … A:` slot with calibration examples | word (fork) | up to 128 |
+| `custom` | a layout loaded with `--prompt-file` (see below) | letter | up to 26 |
 
 The letter styles read a single token at the decision slot. `rwkv_jev` reads the
 full option **words** with a *fork* readout: the candidate tokens form a prefix
 trie, and each fork takes one restricted softmax. When the candidates start with
 different tokens — the common case — that is exactly one softmax, so it costs the
 same as a letter readout.
+
+### Custom layouts
+
+`--prompt custom --prompt-file FILE` reads a layout you supply, for a model
+ifreflex does not ship a style for but whose template it can still wrap. The file
+is split into optional sections, each introduced by a `@@name` line:
+
+| Section | Shown | Placeholders |
+| --- | --- | --- |
+| `@@system` | once, as the system message | — |
+| `@@prefix` | once, shared by every question | `{state}` |
+| `@@branch` | per question, ends the user turn | `{question}`, `{options}` |
+| `@@option` | one line per option | `{label}`, `{text}` |
+
+```
+@@system
+You are a decision model. Answer with one option letter.
+@@prefix
+State:
+{state}
+
+@@branch
+Question:
+{question}
+
+Options:
+{options}
+
+Answer:
+@@option
+{label}. {text}
+```
+
+A file with no `@@` markers is taken as the `@@branch` body alone; a missing
+section keeps a sane default. The chat wrapper still comes from `--template` (pair
+`custom` with `--template native` to use the model's own delimiters), labels still
+come from `--labels`, and `--permutations` shuffles the option lines as usual. The
+body must put a single-token option label where the read happens; because the
+state is a shared prefix, `state` always precedes the per-question text. The
+layout is not in the reflex / SemIf parity suite, and a wrong body degrades the
+read silently (there is no error to catch), so treat it as experimental.
 
 `--template` selects the chat wrapper to match the model family: `chatml` (Qwen,
 default), `gemma4`, `granite4`, `rwkv` (`System:` / `User:` / `Assistant:`),
@@ -348,7 +390,8 @@ build/ifreflex-cli --model Qwen3.5-0.8B-Q8_0.gguf --input requests.jsonl
 | --- | --- |
 | `--model M.gguf` | GGUF checkpoint (required) |
 | `--calibration C.json` | `{"temperature":{noul,choice,score},"head":[8 floats]}` |
-| `--prompt STYLE` | `reflex_markdown` \| `reflex_compact` \| `semif` \| `rwkv_jev` |
+| `--prompt STYLE` | `reflex_markdown` \| `reflex_compact` \| `semif` \| `rwkv_jev` \| `custom` |
+| `--prompt-file FILE` | custom layout for `--prompt custom` (see [Custom layouts](#custom-layouts)) |
 | `--template STYLE` | `chatml` \| `gemma4` \| `granite4` \| `rwkv` \| `plain` \| `native` \| `auto` |
 | `--list-templates` | print llama.cpp's built-in chat template names and exit |
 | `--show-template` | print the GGUF's built-in chat template and exit |

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -20,6 +21,7 @@ struct cli_options {
     std::filesystem::path model;
     std::filesystem::path calibration;
     std::string prompt = "reflex_markdown";
+    std::filesystem::path prompt_file;
     std::string templ = "chatml";
     int permutations = 2;
     std::string combine = "mean";
@@ -73,6 +75,16 @@ void usage() {
         "    reflex_compact   one JSON object per question\n"
         "    semif            SemIf direct-options JSON object\n"
         "    rwkv_jev         RWKV-Jev catalog + JSON field lead (fork readout)\n"
+        "    custom           a layout from --prompt-file (experimental)\n"
+        "\n"
+        "--prompt-file FILE loads a custom layout when --prompt custom is set. The\n"
+        "    file has optional @@system / @@prefix / @@branch / @@option sections:\n"
+        "    @@prefix is the shared body ({state} is the state), @@branch is the\n"
+        "    per-question body ({question} and {options} are substituted), and\n"
+        "    @@option formats one option line ({label} and {text}). The chat wrapper\n"
+        "    still comes from --template. A file with no @@ markers is the @@branch\n"
+        "    body alone; missing sections keep sane defaults. This layout is not in the\n"
+        "    reflex / SemIf parity suite and a wrong body degrades the read silently.\n"
         "\n"
         "--labels STYLE selects the single-token option label to read:\n"
         "    letters  A, B, ... for every option (default, reflex / SemIf parity)\n"
@@ -138,6 +150,7 @@ int main(int argc, char ** argv) {
             else if (arg == "--model") opts.model = val("--model");
             else if (arg == "--calibration") opts.calibration = val("--calibration");
             else if (arg == "--prompt") opts.prompt = val("--prompt");
+            else if (arg == "--prompt-file") opts.prompt_file = val("--prompt-file");
             else if (arg == "--template") opts.templ = val("--template");
             else if (arg == "--permutations") opts.permutations = std::stoi(val("--permutations"));
             else if (arg == "--combine") opts.combine = val("--combine");
@@ -226,6 +239,16 @@ int main(int argc, char ** argv) {
 
         ifreflex::prompt_format fmt;
         fmt.style = ifreflex::style_from_string(opts.prompt);
+        if (fmt.style == ifreflex::prompt_style::custom) {
+            if (opts.prompt_file.empty())
+                throw std::invalid_argument("--prompt custom requires --prompt-file FILE");
+            std::ifstream in(opts.prompt_file);
+            if (!in) throw std::invalid_argument("cannot open prompt file: " + opts.prompt_file.string());
+            fmt.custom = ifreflex::parse_custom_template(
+                std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()));
+        } else if (!opts.prompt_file.empty()) {
+            throw std::invalid_argument("--prompt-file needs --prompt custom");
+        }
         fmt.labels = ifreflex::label_style_from_string(opts.labels);
         fmt.canonical_order = opts.canonical;
 

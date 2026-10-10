@@ -157,10 +157,48 @@ AVX2/AVX-512 与 FMA，无需额外参数。走缓存的 DiffusionGemma 路径�
 | `reflex_compact` | 单个 JSON 对象 `{"state","question","options":[{letter,text}]}` | 字母 | 26 |
 | `semif` | 单个 JSON 对象 `{"evidence","criterion","options":[{letter,description}]}` | 字母 | 16 |
 | `rwkv_jev` | 问题目录放在 system 前缀，每问附加 JSON 字段引导；`noul` 用带校准示例的 `Q: … A:` 槽位 | 词（fork） | 128 |
+| `custom` | 通过 `--prompt-file` 载入的自定义版式（见下） | 字母 | 26 |
 
 字母风格在决策位只读一个 token。`rwkv_jev` 用 *fork* 读出完整选项**词**：候选 token 构成
 一棵前缀树，每个分叉点做一次受限 softmax。当候选首 token 互不相同——这也是最常见的情况
 ——这正好是一次 softmax，成本与字母读出完全一致。
+
+### 自定义版式
+
+`--prompt custom --prompt-file FILE` 读取你自己提供的版式，适用于 ifreflex 未内置风格、但
+模板仍可包裹的模型。文件按可选分段组织，每段以一行 `@@name` 开头：
+
+| 分段 | 出现位置 | 占位符 |
+| --- | --- | --- |
+| `@@system` | 一次，作为 system 消息 | — |
+| `@@prefix` | 一次，所有问题共享 | `{state}` |
+| `@@branch` | 每问一次，收束 user 轮 | `{question}`、`{options}` |
+| `@@option` | 每个选项一行 | `{label}`、`{text}` |
+
+```
+@@system
+You are a decision model. Answer with one option letter.
+@@prefix
+State:
+{state}
+
+@@branch
+Question:
+{question}
+
+Options:
+{options}
+
+Answer:
+@@option
+{label}. {text}
+```
+
+文件中若没有 `@@` 标记，则整份内容当作 `@@branch` 正文；缺失的分段使用合理默认值。对话
+包裹仍来自 `--template`（把 `custom` 配 `--template native` 即可用模型自带的分隔符），标签
+仍来自 `--labels`，`--permutations` 照常打乱选项行。正文必须把**单 token 的选项标签**放在
+读出位；由于 state 是共享前缀，`state` 始终位于每问正文之前。该版式不在 reflex / SemIf 对齐
+套件内，正文写错会**静默**降低读出质量（没有可捕获的错误），请按实验特性对待。
 
 `--template` 选择与模型家族匹配的对话包裹：`chatml`（Qwen，默认）、`gemma4`、
 `granite4`、`rwkv`（`System:` / `User:` / `Assistant:`）、`plain`、`native` 或
@@ -305,7 +343,8 @@ build/ifreflex-cli --model Qwen3.5-0.8B-Q8_0.gguf --input requests.jsonl
 | --- | --- |
 | `--model M.gguf` | GGUF 权重（必填） |
 | `--calibration C.json` | `{"temperature":{noul,choice,score},"head":[8 floats]}` |
-| `--prompt STYLE` | `reflex_markdown` \| `reflex_compact` \| `semif` \| `rwkv_jev` |
+| `--prompt STYLE` | `reflex_markdown` \| `reflex_compact` \| `semif` \| `rwkv_jev` \| `custom` |
+| `--prompt-file FILE` | `--prompt custom` 的自定义版式（见[自定义版式](#自定义版式)） |
 | `--template STYLE` | `chatml` \| `gemma4` \| `granite4` \| `rwkv` \| `plain` \| `native` \| `auto` |
 | `--list-templates` | 打印 llama.cpp 内置 chat template 名称后退出 |
 | `--show-template` | 打印 GGUF 内置 chat template 后退出 |

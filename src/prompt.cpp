@@ -1,6 +1,7 @@
 #include "ifreflex/prompt.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <iterator>
 #include <stdexcept>
 
@@ -60,6 +61,7 @@ prompt_style style_from_string(const std::string & name) {
     if (name == "semif") return prompt_style::semif;
     if (name == "rwkv_jev" || name == "rwkv" || name == "jev_like")
         return prompt_style::rwkv_jev;
+    if (name == "custom" || name == "template") return prompt_style::custom;
     throw std::invalid_argument("Unknown prompt style: " + name);
 }
 
@@ -69,6 +71,7 @@ std::string style_to_string(prompt_style style) {
         case prompt_style::reflex_compact: return "reflex_compact";
         case prompt_style::semif: return "semif";
         case prompt_style::rwkv_jev: return "rwkv_jev";
+        case prompt_style::custom: return "custom";
     }
     return "reflex_markdown";
 }
@@ -182,6 +185,64 @@ std::string render_text(const json & value) {
     return value.dump(2);
 }
 
+namespace {
+
+// Replace every occurrence of `token` in `text` with `value`.
+std::string replace_token(std::string text, const std::string & token, const std::string & value) {
+    for (size_t pos = text.find(token); pos != std::string::npos; pos = text.find(token, pos + value.size()))
+        text.replace(pos, token.size(), value);
+    return text;
+}
+
+std::string trim_blank(const std::string & text) {
+    const size_t first = text.find_first_not_of("\r\n");
+    if (first == std::string::npos) return "";
+    const size_t last = text.find_last_not_of(" \t\r\n");
+    return text.substr(first, last - first + 1);
+}
+
+} // namespace
+
+custom_template parse_custom_template(const std::string & text) {
+    custom_template out;
+    // No section markers: the whole file is the per-question branch body.
+    if (text.find("@@") == std::string::npos) {
+        out.branch = text;
+        return out;
+    }
+    std::string section;
+    std::string buffer;
+    auto flush = [&]() {
+        const std::string value = trim_blank(buffer);
+        if (section == "system") out.system = value;
+        else if (section == "prefix" || section == "state") out.prefix = value;
+        else if (section == "branch" || section == "body" || section == "question") out.branch = value;
+        else if (section == "option") out.option = value;
+        buffer.clear();
+    };
+    size_t start = 0;
+    while (start <= text.size()) {
+        const size_t nl = text.find('\n', start);
+        const std::string line = text.substr(start, nl == std::string::npos ? std::string::npos : nl - start);
+        if (line.rfind("@@", 0) == 0) {
+            flush();
+            section = line.substr(2);
+            section.erase(0, section.find_first_not_of(" \t"));
+            const size_t end = section.find_last_not_of(" \t\r");
+            section = end == std::string::npos ? "" : section.substr(0, end + 1);
+            std::transform(section.begin(), section.end(), section.begin(),
+                           [](unsigned char c) { return (char) std::tolower(c); });
+        } else {
+            buffer += line;
+            if (nl != std::string::npos) buffer += '\n';
+        }
+        if (nl == std::string::npos) break;
+        start = nl + 1;
+    }
+    flush();
+    return out;
+}
+
 std::string system_prompt(const prompt_format & fmt) {
     switch (fmt.style) {
         case prompt_style::reflex_markdown:
@@ -200,6 +261,10 @@ std::string system_prompt(const prompt_format & fmt) {
             return "You are a calibrated decision engine. For each field of the JSON output, "
                    "answer with exactly one allowed value of that field, based only on the "
                    "user context. Follow the question catalog.";
+        case prompt_style::custom:
+            if (!fmt.custom.system.empty()) return fmt.custom.system;
+            return "You are a decision model. Read the state and the question, and answer "
+                   "with exactly one of the listed options. Reply with the option label only.";
     }
     return "";
 }
@@ -255,6 +320,8 @@ std::string render_state_prefix(const prompt_format & fmt, const json & state) {
         body = "{\"evidence\": " + json_value_compact(state) + ", ";
     } else if (fmt.style == prompt_style::reflex_compact) {
         body = "{\"state\": " + json_value_compact(state) + ", ";
+    } else if (fmt.style == prompt_style::custom) {
+        body = replace_token(fmt.custom.prefix, "{state}", render_text(state));
     } else {
         body = "# Evidence\n" + render_text(state) + "\n\n";
     }
@@ -321,6 +388,19 @@ std::string compact_body(const json & instructions,
     // Drop the leading '{': the state prefix already opened the object.
     const std::string dumped = dump_python_compact(payload);
     return dumped.substr(1);
+}
+
+// Custom template: one option line per entry, joined by newlines.
+std::string custom_options_block(const custom_template & tmpl,
+                                 const std::vector<std::pair<std::string, std::string>> & labelled) {
+    std::string out;
+    for (size_t i = 0; i < labelled.size(); ++i) {
+        if (i) out += "\n";
+        std::string line = replace_token(tmpl.option, "{label}", labelled[i].first);
+        line = replace_token(line, "{text}", labelled[i].second);
+        out += line;
+    }
+    return out;
 }
 
 } // namespace
@@ -529,6 +609,13 @@ std::vector<branch> build_branches(const prompt_format & fmt,
         std::string text;
         if (fmt.style == prompt_style::reflex_markdown) {
             text = markdown_options_block(fmt, instructions, labelled, ask);
+        } else if (fmt.style == prompt_style::custom) {
+            text = replace_token(fmt.custom.branch, "{question}", render_text(instructions));
+            const std::string block = custom_options_block(fmt.custom, labelled);
+            if (text.find("{options}") != std::string::npos)
+                text = replace_token(text, "{options}", block);
+            else
+                text += "\n" + block;
         } else {
             text = compact_body(instructions, labelled, fmt.style == prompt_style::semif);
         }
