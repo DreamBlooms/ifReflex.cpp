@@ -84,7 +84,11 @@ std::string llada_moe_backend::build_prompt(const diffusion_runtime & rt,
                    "<role>HUMAN</role>" + user2 + "<|role_end|>" +
                    "<role>ASSISTANT</role>";
         }
-        return "<|startoftext|><role>system</role>" + system2 + "<|role_end|>" +
+        // The 2.2 template itself carries no BOS and the tokenizer does not add one
+        // (add_bos_token=false, encode() uses add_special_tokens=false). IFREFLEX_LLADA2_NO_BOS
+        // drops the hand-added <|startoftext|> for A/B.
+        const std::string head = std::getenv("IFREFLEX_LLADA2_NO_BOS") ? "" : "<|startoftext|>";
+        return head + "<role>system</role>" + system2 + "<|role_end|>" +
                "<role>user</role>" + user2 + "<|role_end|>" +
                "<role>assistant</role>";
     }
