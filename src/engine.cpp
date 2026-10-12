@@ -58,6 +58,7 @@ struct engine::impl {
     bool cache_hit_last = false;
     int last_state_tokens = 0;
     int gpu_layers = 0;
+    bool batch_branches = false;  // IFREFLEX_BATCH_BRANCHES: one multi-seq decode for all branches
     std::vector<ggml_backend_dev_t> devices;  // must outlive the model
 
     // Cross-request LRU of decoded state prefixes, keyed by the exact prefix
@@ -117,6 +118,14 @@ struct engine::impl {
         cparams.n_batch = (uint32_t) std::min(opts.n_batch, want_ctx);
         cparams.n_threads = opts.threads > 0 ? opts.threads : physical_core_count();
         cparams.n_threads_batch = cparams.n_threads;
+        // Opt-in: batch a request's branches into one multi-sequence decode
+        // (shared prefix copied per sequence). Off by default; the checkpoint
+        // path shares the prefix without replicating its KV.
+        batch_branches = std::getenv("IFREFLEX_BATCH_BRANCHES") != nullptr;
+        if (batch_branches) {
+            cparams.n_seq_max = 16;
+            cparams.kv_unified = true;
+        }
         ctx = llama_init_from_model(model, cparams);
         if (!ctx) throw std::runtime_error("failed to create context");
     }
@@ -172,6 +181,42 @@ struct engine::impl {
         llama_memory_seq_rm(llama_get_memory(ctx), seq, -1, -1);
         if (state_tokens_out) *state_tokens_out = (int) tokens.size();
         return decode_at(tokens, seq, 0);
+    }
+
+    // Opt-in batch: each tail on its own sequence, the already-decoded prefix
+    // (seq 0) copied with llama_memory_seq_cp. One forward for all branches;
+    // returns the last-token logits row per branch.
+    std::vector<std::vector<float>> decode_branches(
+            const std::vector<std::vector<llama_token>> & tails, llama_pos start_pos) {
+        const int nb = (int) tails.size();
+        llama_memory_t mem = llama_get_memory(ctx);
+        for (int r = 1; r < nb; ++r) {
+            llama_memory_seq_cp(mem, 0, (llama_seq_id) r, 0, start_pos);
+        }
+        std::vector<llama_token> btok;
+        std::vector<llama_pos> bpos;
+        std::vector<llama_seq_id> bseq;
+        std::vector<int8_t> bout;
+        std::vector<int> last_idx(nb, -1);
+        for (int r = 0; r < nb; ++r) {
+            for (size_t i = 0; i < tails[r].size(); ++i) {
+                btok.push_back(tails[r][i]);
+                bpos.push_back(start_pos + (llama_pos) i);
+                bseq.push_back((llama_seq_id) r);
+                bout.push_back(0);
+            }
+            if (!bout.empty()) { last_idx[r] = (int) bout.size() - 1; bout.back() = 1; }
+        }
+        if (decode_tokens(ctx, btok, bpos, bseq, bout) != 0)
+            throw std::runtime_error("llama_process failed");
+
+        std::vector<std::vector<float>> rows(nb);
+        for (int r = 0; r < nb; ++r) {
+            const float * row = last_idx[r] >= 0 ? llama_get_logits_ith(ctx, last_idx[r]) : nullptr;
+            if (!row) throw std::runtime_error("logits unavailable");
+            rows[r] = std::vector<float>(row, row + n_vocab);
+        }
+        return rows;
     }
 
     // Snapshot / restore a sequence's decoded state (KV for attention, recurrent
@@ -427,6 +472,35 @@ std::vector<branch_result> engine::score_branches(const std::string & state_pref
     // Decode the shared state prefix once (or restore it from a previous request)
     // and reuse it for every branch.
     const std::vector<uint8_t> & prefix_state = p->load_prefix(prefix);
+
+    // Opt-in: one multi-sequence decode for all branches of this request.
+    if (p->batch_branches && branches.size() > 1) {
+        std::vector<std::vector<llama_token>> tails;
+        std::vector<std::vector<int>> label_ids(branches.size());
+        tails.reserve(branches.size());
+        for (size_t b = 0; b < branches.size(); ++b) {
+            tails.push_back(tokenize_text(p->vocab, branches[b].text, /*add_special=*/false,
+                                          /*parse_special=*/true));
+            for (const auto & l : branches[b].labels) label_ids[b].push_back(p->label_token(l));
+        }
+        const std::vector<std::vector<float>> rows =
+            p->decode_branches(tails, (llama_pos) prefix.size());
+        std::vector<branch_result> results;
+        results.reserve(branches.size());
+        for (size_t b = 0; b < branches.size(); ++b) {
+            const branch & br = branches[b];
+            branch_result r;
+            r.qid = br.qid;
+            r.kind = br.kind;
+            r.labels = br.labels;
+            r.keys = br.keys;
+            r.logits.reserve(label_ids[b].size());
+            for (int id : label_ids[b]) r.logits.push_back(rows[b][id]);
+            r.state_tokens = (int) (prefix.size() + tails[b].size());
+            results.push_back(std::move(r));
+        }
+        return results;
+    }
 
     std::vector<branch_result> results;
     results.reserve(branches.size());
