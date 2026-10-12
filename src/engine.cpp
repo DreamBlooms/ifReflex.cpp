@@ -216,6 +216,11 @@ struct engine::impl {
             if (!row) throw std::runtime_error("logits unavailable");
             rows[r] = std::vector<float>(row, row + n_vocab);
         }
+        // Drop the extra sequences (seq 0 is cleaned by the next load_prefix);
+        // otherwise their copied prefix KV accumulates until n_ctx is exhausted.
+        for (int r = 1; r < nb; ++r) {
+            llama_memory_seq_rm(mem, (llama_seq_id) r, -1, -1);
+        }
         return rows;
     }
 
