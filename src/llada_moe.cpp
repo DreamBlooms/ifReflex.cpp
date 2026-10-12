@@ -18,6 +18,7 @@
 #include <random>
 #include <stdexcept>
 
+#include "ifreflex/decode.hpp"
 #include "ifreflex/diffusion_core.hpp"
 #include "llama.h"
 
@@ -144,24 +145,23 @@ void llada_moe_backend::denoise(diffusion_runtime & rt,
     // attends bidirectionally over the whole thing, so we decode it in one pass
     // and read the answer-slot rows. No KV-cache phase separation needed.
     const int total = n_input + width;
-    llama_batch batch = llama_batch_init(total, 0, 1);
     llama_set_causal_attn(rt.ctx, false);
 
     float prev_temp_inv = 1.0f;
     for (int step = 0; step < steps; ++step) {
-        batch.n_tokens = total;
+        std::vector<llama_token> btok((size_t) total);
+        std::vector<llama_pos> bpos((size_t) total);
+        std::vector<llama_seq_id> bseq((size_t) total, 0);
+        std::vector<int8_t> bout((size_t) total, 1);
         for (int i = 0; i < total; ++i) {
-            batch.token[i] = (i < n_input) ? prompt_tokens[i] : cur[(size_t)(i - n_input)];
-            batch.pos[i] = i;
-            batch.n_seq_id[i] = 1;
-            batch.seq_id[i][0] = 0;
-            batch.logits[i] = 1;
+            btok[(size_t) i] = (i < n_input) ? prompt_tokens[i] : cur[(size_t)(i - n_input)];
+            bpos[(size_t) i] = i;
         }
         // The whole sequence is re-decoded each pass (and across requests), so drop
-        // the stale KV for sequence 0 first; otherwise llama_decode rejects the
+        // the stale KV for sequence 0 first; otherwise llama_process rejects the
         // rewinding positions as non-consecutive.
         llama_memory_seq_rm(llama_get_memory(rt.ctx), 0, -1, -1);
-        if (llama_decode(rt.ctx, batch) != 0)
+        if (decode_tokens(rt.ctx, btok, bpos, bseq, bout) != 0)
             throw std::runtime_error("llada canvas decode failed");
 
         const float * logits = llama_get_logits(rt.ctx);
@@ -193,7 +193,6 @@ void llada_moe_backend::denoise(diffusion_runtime & rt,
         (void) prev_temp_inv;
     }
 
-    llama_batch_free(batch);
 }
 
 } // namespace ifreflex

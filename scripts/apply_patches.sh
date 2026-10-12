@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Apply the ifreflex patches onto the pinned llama.cpp submodule.
 #
-# The submodule is pinned to upstream v0.5.0. The diffusion build needs three
+# The submodule is pinned to upstream v0.6.0. The diffusion build needs three
 # patches on top (DiffusionGemma, PR #24423; the per-request canvas split
 # ifreflex adds; and LLaDA2.x support); they live in third_party/patches and are
 # regenerated with scripts/gen_patches.sh. Safe to run before every build:

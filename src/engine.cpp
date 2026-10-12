@@ -10,6 +10,7 @@
 #include <stdexcept>
 
 #include "ifreflex/prefix_cache.hpp"
+#include "ifreflex/decode.hpp"
 #include "ifreflex/sys.hpp"
 #include "ggml-backend.h"
 #include "llama.h"
@@ -145,22 +146,18 @@ struct engine::impl {
             const size_t take = std::min(batch_max, n - start);
             chunk.assign(tokens.begin() + (long) start, tokens.begin() + (long) (start + take));
 
-            llama_batch batch = llama_batch_init((int32_t) chunk.size(), 0, 1);
+            std::vector<llama_token> btok(chunk.begin(), chunk.end());
+            std::vector<llama_pos> bpos(chunk.size());
+            std::vector<llama_seq_id> bseq(chunk.size(), seq);
+            std::vector<int8_t> bout(chunk.size(), 0);
             for (size_t i = 0; i < chunk.size(); ++i) {
-                batch.token[i] = chunk[i];
-                batch.pos[i] = start_pos + (llama_pos) (start + i);
-                batch.n_seq_id[i] = 1;
-                batch.seq_id[i][0] = seq;
-                batch.logits[i] = 0;
+                bpos[i] = start_pos + (llama_pos) (start + i);
             }
-            batch.n_tokens = (int32_t) chunk.size();
             // Only the very last token of the final chunk needs logits.
-            if (start + take == n) batch.logits[chunk.size() - 1] = 1;
-            if (llama_decode(ctx, batch) != 0) {
-                llama_batch_free(batch);
-                throw std::runtime_error("llama_decode failed");
+            if (start + take == n) bout[chunk.size() - 1] = 1;
+            if (decode_tokens(ctx, btok, bpos, bseq, bout) != 0) {
+                throw std::runtime_error("llama_process failed");
             }
-            llama_batch_free(batch);
             start += take;
         }
 

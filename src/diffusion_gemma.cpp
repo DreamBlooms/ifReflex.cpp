@@ -22,6 +22,7 @@
 #include <random>
 #include <stdexcept>
 
+#include "ifreflex/decode.hpp"
 #include "ifreflex/diffusion_core.hpp"
 #include "llama.h"
 
@@ -70,26 +71,25 @@ void gemma_backend::prepare(diffusion_runtime & rt,
     // PREFILL the prompt once into the prompt-KV store (causal), so every draw
     // below DECODEs only the canvas. The reference driver chunks to n_ubatch; our
     // context already sizes n_ubatch for the whole request, so this is one chunk.
-    llama_batch batch = llama_batch_init(std::max(1, n_input), 0, 1);
     llama_set_causal_attn(rt.ctx, false);
     const int U = std::max(1, (int) llama_n_ubatch(rt.ctx));
     bool ok = true;
     for (int s = 0; s < n_input && ok; s += U) {
         const int u = std::min(U, n_input - s);
         llama_diffusion_set_phase(rt.model, /*PKV_PREFILL=*/1, n_input, s);
-        batch.n_tokens = u;
+        std::vector<llama_token> btok(u);
+        std::vector<llama_pos> bpos(u);
+        std::vector<llama_seq_id> bseq(u, 0);
+        std::vector<int8_t> bout(u, 0);
         for (int i = 0; i < u; ++i) {
-            batch.token[i] = prompt_tokens[(size_t)(s + i)];
-            batch.pos[i] = s + i;
-            batch.n_seq_id[i] = 1;
-            batch.seq_id[i][0] = 0;
+            btok[i] = prompt_tokens[(size_t)(s + i)];
+            bpos[i] = s + i;
             // PREFILL logits are unused; flag one row per chunk so a capped
             // n_outputs reserves a row.
-            batch.logits[i] = (i == u - 1) ? 1 : 0;
+            bout[i] = (i == u - 1) ? 1 : 0;
         }
-        if (llama_decode(rt.ctx, batch) != 0) ok = false;
+        if (decode_tokens(rt.ctx, btok, bpos, bseq, bout) != 0) ok = false;
     }
-    llama_batch_free(batch);
     if (!ok) {
         llama_diffusion_set_phase(rt.model, /*PKV_UNIFIED=*/0, 0, 0);
         throw std::runtime_error("gemma prompt prefill failed");
@@ -164,19 +164,18 @@ void gemma_backend::denoise(diffusion_runtime & rt,
     std::vector<float> sc_buffer((size_t) width * n_vocab, 0.0f);
     std::vector<llama_token> un_x((size_t) total, 0);
 
-    llama_batch batch = llama_batch_init(total, 0, 1);
     llama_set_causal_attn(rt.ctx, false);
 
     auto decode_seq = [&](const std::vector<llama_token> & seq, std::vector<float> & out) {
-        batch.n_tokens = total;
+        std::vector<llama_token> btok((size_t) total);
+        std::vector<llama_pos> bpos((size_t) total);
+        std::vector<llama_seq_id> bseq((size_t) total, 0);
+        std::vector<int8_t> bout((size_t) total, 1);
         for (int i = 0; i < total; ++i) {
-            batch.token[i] = seq[(size_t) i];
-            batch.pos[i] = cached ? (rt.pkv_n_input + i) : i;
-            batch.n_seq_id[i] = 1;
-            batch.seq_id[i][0] = 0;
-            batch.logits[i] = 1;
+            btok[(size_t) i] = seq[(size_t) i];
+            bpos[(size_t) i] = cached ? (rt.pkv_n_input + i) : i;
         }
-        if (llama_decode(rt.ctx, batch) != 0)
+        if (decode_tokens(rt.ctx, btok, bpos, bseq, bout) != 0)
             throw std::runtime_error("gemma canvas decode failed");
         // Copy the canvas rows out immediately via llama_get_logits_ith, which
         // maps a logical output index to its actual buffer row (the layout is not
@@ -253,7 +252,6 @@ void gemma_backend::denoise(diffusion_runtime & rt,
     }
 
     llama_diffusion_set_sc(rt.model, nullptr, 0.0f, 1.0f, false);
-    llama_batch_free(batch);
 }
 
 } // namespace ifreflex
