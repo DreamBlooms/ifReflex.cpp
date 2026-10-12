@@ -106,10 +106,10 @@ void usage() {
         "    changes the prompt layout, so the reflex / SemIf parity tests cover the\n"
         "    default (off) only.\n"
         "\n"
-        "--batch-branches evaluates all branches of a request in one multi-sequence\n"
-        "    decode sharing the prefix (faster on many-question requests). The chosen\n"
-        "    options are unchanged, but on hybrid backbones the probabilities differ in\n"
-        "    the low digits; off by default (also IFREFLEX_BATCH_BRANCHES=1).\n"
+        "--batch-branches, aka --shared-prefix, evaluates all branches of a request\n"
+        "    in one multi-sequence decode sharing the prefix (faster on many-question\n"
+        "    requests). The chosen options are unchanged, but on hybrid backbones the\n"
+        "    probabilities differ in the low digits; off by default.\n"
         "\n"
         "--prior-strength X divides each question's probabilities by the running\n"
         "    mean of that question's answers, raised to X (0.0 disables, default 0.75;\n"
@@ -172,7 +172,7 @@ int main(int argc, char ** argv) {
             else if (arg == "--ctx") opts.ctx_size = std::stoi(val("--ctx"));
             else if (arg == "--gpu-layers") opts.gpu_layers = std::stoi(val("--gpu-layers"));
             else if (arg == "--prefix-cache-mib") opts.prefix_cache_mib = std::stoi(val("--prefix-cache-mib"));
-            else if (arg == "--batch-branches") opts.batch_branches = true;
+            else if (arg == "--batch-branches" || arg == "--shared-prefix") opts.batch_branches = true;
             else if (arg == "--device") opts.device = val("--device");
             else if (arg == "--raw") opts.raw = true;
             else if (arg == "--show-template") opts.show_template = true;

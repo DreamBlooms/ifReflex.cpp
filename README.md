@@ -417,7 +417,7 @@ build/ifreflex-cli --model Qwen3.5-0.8B-Q8_0.gguf --input requests.jsonl
 | `--raw` | print uncalibrated readout probabilities |
 | `--threads N`, `--n-batch N`, `--ctx N`, `--gpu-layers N`, `--device D` | runtime |
 | `--prefix-cache-mib N` | decoded-prefix LRU budget (MiB, default 256; 0 disables) |
-| `--batch-branches` | one multi-sequence decode for all branches of a request (off; faster, low-digit prob. shift) |
+| `--batch-branches` (aka `--shared-prefix`) | one multi-sequence decode for all branches of a request (off; faster, low-digit prob. shift) |
 | `--server --host --port --api-key --cors-origin --served-name` | HTTP |
 | `--input FILE` | offline: one request object per line |
 
