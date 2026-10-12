@@ -35,6 +35,7 @@ struct engine_options {
     int gpu_layers = 0;  // Layers kept in VRAM; 0 is CPU only, negative is all.
     std::string device;  // Comma-separated ggml device names; empty uses the default.
     size_t prefix_cache_mib = 256; // Cross-request decoded-prefix cache budget; 0 disables.
+    bool batch_branches = false;   // One multi-sequence decode for all branches of a request.
 };
 
 // One decoded branch's restricted option logits, before calibration.

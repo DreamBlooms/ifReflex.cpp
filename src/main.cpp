@@ -37,6 +37,7 @@ struct cli_options {
     int ctx_size = 0;
     int gpu_layers = 0;
     int prefix_cache_mib = 256;
+    bool batch_branches = false;
     std::string device;
     bool raw = false;
     bool show_template = false;
@@ -64,7 +65,7 @@ void usage() {
         "       ifreflex-cli --fit-calibration D.jsonl --fit-out C.json\n"
         "                    [--template STYLE] [--permutations N] [--threads N] [--n-batch N]\n"
         "                    [--ctx N] [--gpu-layers N] [--device NAME[,NAME]]\n"
-        "                    [--prefix-cache-mib N] [--raw]\n"
+        "                    [--prefix-cache-mib N] [--batch-branches] [--raw]\n"
         "                    [--server --host H --port P --api-key K --cors-origin O\n"
         "                     --served-name NAME | --input requests.jsonl]\n"
         "       ifreflex-cli --list-devices | --list-templates\n"
@@ -104,6 +105,11 @@ void usage() {
         "    the options were typed. Use it together with --combine logmean; it\n"
         "    changes the prompt layout, so the reflex / SemIf parity tests cover the\n"
         "    default (off) only.\n"
+        "\n"
+        "--batch-branches evaluates all branches of a request in one multi-sequence\n"
+        "    decode sharing the prefix (faster on many-question requests). The chosen\n"
+        "    options are unchanged, but on hybrid backbones the probabilities differ in\n"
+        "    the low digits; off by default (also IFREFLEX_BATCH_BRANCHES=1).\n"
         "\n"
         "--prior-strength X divides each question's probabilities by the running\n"
         "    mean of that question's answers, raised to X (0.0 disables, default 0.75;\n"
@@ -166,6 +172,7 @@ int main(int argc, char ** argv) {
             else if (arg == "--ctx") opts.ctx_size = std::stoi(val("--ctx"));
             else if (arg == "--gpu-layers") opts.gpu_layers = std::stoi(val("--gpu-layers"));
             else if (arg == "--prefix-cache-mib") opts.prefix_cache_mib = std::stoi(val("--prefix-cache-mib"));
+            else if (arg == "--batch-branches") opts.batch_branches = true;
             else if (arg == "--device") opts.device = val("--device");
             else if (arg == "--raw") opts.raw = true;
             else if (arg == "--show-template") opts.show_template = true;
@@ -259,6 +266,7 @@ int main(int argc, char ** argv) {
         eopts.ctx_size = opts.ctx_size;
         eopts.gpu_layers = opts.gpu_layers;
         eopts.prefix_cache_mib = (size_t) std::max(0, opts.prefix_cache_mib);
+        eopts.batch_branches = opts.batch_branches;
         eopts.device = opts.device;
 
         // Diffusion block-canvas backend: structured reads on DiffusionGemma.

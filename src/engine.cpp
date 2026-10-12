@@ -120,8 +120,9 @@ struct engine::impl {
         cparams.n_threads_batch = cparams.n_threads;
         // Opt-in: batch a request's branches into one multi-sequence decode
         // (shared prefix copied per sequence). Off by default; the checkpoint
-        // path shares the prefix without replicating its KV.
-        batch_branches = std::getenv("IFREFLEX_BATCH_BRANCHES") != nullptr;
+        // path shares the prefix without replicating its KV. Enabled by
+        // --batch-branches or the IFREFLEX_BATCH_BRANCHES env var.
+        batch_branches = opts.batch_branches || std::getenv("IFREFLEX_BATCH_BRANCHES") != nullptr;
         if (batch_branches) {
             cparams.n_seq_max = 16;
             cparams.kv_unified = true;

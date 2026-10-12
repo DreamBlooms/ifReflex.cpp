@@ -363,6 +363,7 @@ build/ifreflex-cli --model Qwen3.5-0.8B-Q8_0.gguf --input requests.jsonl
 | `--raw` | 输出未经校准的读出概率 |
 | `--threads N`、`--n-batch N`、`--ctx N`、`--gpu-layers N`、`--device D` | 运行时 |
 | `--prefix-cache-mib N` | 已解码前缀 LRU 预算（MiB，默认 256；0 关闭） |
+| `--batch-branches` | 把一次请求的所有分支合并为一次多序列解码（默认关；更快，概率低位有差异） |
 | `--server --host --port --api-key --cors-origin --served-name` | HTTP |
 | `--input FILE` | 离线模式：每行一个请求对象 |
 
