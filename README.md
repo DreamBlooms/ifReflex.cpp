@@ -80,7 +80,7 @@ state seen before skips its prefill; the gain grows with state length and reuse.
 The model weights themselves are loaded once and stay resident for the process.
 
 By default each branch is its own forward (the prefix snapshot is restored per
-branch). Setting `IFREFLEX_BATCH_BRANCHES=1` instead evaluates all branches of a
+branch). Setting `--batch-branches` instead evaluates all branches of a
 request in **one** multi-sequence decode sharing the prefix (~1.5-2x faster on a
 many-question request). The chosen options are identical, but on hybrid backbones
 (e.g. Qwen3.5) the probabilities differ in the low digits, so it is off by
