@@ -1,37 +1,32 @@
 #!/usr/bin/env bash
 # Regenerate the patches under third_party/patches from the llama.cpp submodule.
 #
-# The submodule is pinned to upstream v0.5.0. The diffusion build is that base
+# The submodule is pinned to upstream v0.8.0. The diffusion build is that base
 # plus:
 #   0001-diffusion-gemma-pr24423.patch           upstream PR #24423, rebased
 #   0002-diffusion-gemma-canvas-override.patch   ifreflex's own change on top
 #   0003-llada2.patch                            LLaDA2.x diffusion support
 #
-# Patch 1 is the PR's tree delta rebased onto v0.5.0. The raw PR head
-# (3dac51dc8) is based on an older upstream commit, so diffing it against v0.5.0
-# drags in unrelated upstream drift; the rebased merge (393b72673) is what
-# applies cleanly and is what we vendor.
+# Patch 1 is the PR's tree delta rebased onto v0.8.0. Patch 2 and 3 are diffed
+# straight against the patch-1 tree (their file sets are disjoint), so all three
+# are regenerated here from the working tree, which must hold the whole applied
+# series (base + patch 1 + patch 2 + patch 3).
 #
-# Patches 2 and 3 touch disjoint file sets, so both are diffed straight against
-# the PR merge. Patch 3 is the LLaDA2 model support (arch + converter + the
-# block-diffusion sampler controls); it also applies on the PR merge alone.
-#
-# This is a maintainer tool. With the working tree holding the applied patches
-# (plus any edit you are iterating on), run it to rewrite all three files:
-#   * patch 1   = diff <base_tag> <pr_merge>
-#   * patch 2   = diff <pr_merge> <working tree>  (canvas files)
-#   * patch 3   = diff <pr_merge> <working tree>  (llada2 files)
-# Provenance headers are emitted here so regeneration never loses them.
+# This is a maintainer tool: with the series applied (plus any edit you are
+# iterating on), run it to rewrite all three files. It makes temporary commits
+# to slice the series and restores the working tree afterwards.
 #
 # Usage: scripts/gen_patches.sh [llama_dir]
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 LLAMA_DIR=${1:-$ROOT/third_party/llama.cpp}
-BASE_TAG=v0.5.0
-PR_HEAD=3dac51dc80b1400929266453c6ced6748ccf6862   # ggml-org/llama.cpp PR #24423 head
-PR_MERGE=393b72673e0d521e1e7cb6fd161555826cfdc32f # PR #24423 rebased onto v0.5.0
+BASE_TAG=v0.8.0
 PATCH_DIR=$ROOT/third_party/patches
+
+P1=$PATCH_DIR/0001-diffusion-gemma-pr24423.patch
+P2=$PATCH_DIR/0002-diffusion-gemma-canvas-override.patch
+P3=$PATCH_DIR/0003-llada2.patch
 
 # Files each series patch owns (disjoint between patches 2 and 3).
 CANVAS_FILES=(
@@ -53,32 +48,53 @@ LLADA2_FILES=(
     common/common.h
 )
 
-BASE=$(git -C "$LLAMA_DIR" rev-parse "${BASE_TAG}^{commit}")
-if ! git -C "$LLAMA_DIR" cat-file -e "${PR_MERGE}^{commit}" 2>/dev/null; then
-    echo "error: PR merge ${PR_MERGE:0:9} not present; apply the patches first" >&2
+if ! git -C "$LLAMA_DIR" cat-file -e "${BASE_TAG}^{commit}" 2>/dev/null; then
+    echo "error: base tag ${BASE_TAG} not present in ${LLAMA_DIR}" >&2
     exit 1
 fi
 
-P1=$PATCH_DIR/0001-diffusion-gemma-pr24423.patch
-P2=$PATCH_DIR/0002-diffusion-gemma-canvas-override.patch
-P3=$PATCH_DIR/0003-llada2.patch
+SENTINEL_FILE=include/llama.h
+SENTINEL_TEXT="llama_diffusion_set_canvas"
+if ! grep -q "$SENTINEL_TEXT" "$LLAMA_DIR/$SENTINEL_FILE" 2>/dev/null; then
+    echo "error: the patch series is not applied to $LLAMA_DIR; run scripts/apply_patches.sh first" >&2
+    exit 1
+fi
+
+BASE=$(git -C "$LLAMA_DIR" rev-parse "${BASE_TAG}^{commit}")
+ORIG=$(git -C "$LLAMA_DIR" rev-parse HEAD)
+
+# Slice the applied series into three commits: T_FULL (all), T2 (base+1+2),
+# T1 (base+1). Reverse-applying patch 3 then patch 2 peels them off.
+git -C "$LLAMA_DIR" add -A
+git -C "$LLAMA_DIR" commit -q -m "gen_patches: full series"
+T_FULL=$(git -C "$LLAMA_DIR" rev-parse HEAD)
+
+git -C "$LLAMA_DIR" apply -R "$P3"
+git -C "$LLAMA_DIR" add -A
+git -C "$LLAMA_DIR" commit -q -m "gen_patches: without patch 3"
+T2=$(git -C "$LLAMA_DIR" rev-parse HEAD)
+
+git -C "$LLAMA_DIR" apply -R "$P2"
+git -C "$LLAMA_DIR" add -A
+git -C "$LLAMA_DIR" commit -q -m "gen_patches: without patch 2"
+T1=$(git -C "$LLAMA_DIR" rev-parse HEAD)
 
 {
     cat <<EOF
 From: DiffusionGemma contributors <noreply@github.com>
 Subject: [PATCH 1/3] DiffusionGemma block-diffusion support (upstream PR #24423)
 
-Upstream: https://github.com/ggml-org/llama.cpp/pull/24423 (head ${PR_HEAD:0:9}).
+Upstream: https://github.com/ggml-org/llama.cpp/pull/24423 (head 3dac51dc8).
 The PR head is based on an older upstream commit, so this is the PR's tree delta
-rebased onto the ${BASE_TAG} tag (merge ${PR_MERGE:0:9}), which is what applies
-cleanly to the pinned submodule. Not modified from the PR.
+rebased onto the ${BASE_TAG} tag (merge ${BASE:0:9}), which is what applies cleanly to
+the pinned submodule. Not modified from the PR.
 
 Drop this patch once PR #24423 lands in an upstream release and the submodule is
 bumped past it.
 
 ---
 EOF
-    git -C "$LLAMA_DIR" diff --no-color "$BASE" "$PR_MERGE" --
+    git -C "$LLAMA_DIR" diff --no-color "$BASE" "$T1"
 } > "$P1"
 
 {
@@ -97,10 +113,7 @@ Base: ${BASE_TAG} + patch 1/3.
 
 ---
 EOF
-    # diffusion-gemma.cpp is added by patch 1 and untracked here; mark it so diff sees a change
-    git -C "$LLAMA_DIR" add -N src/models/diffusion-gemma.cpp
-    git -C "$LLAMA_DIR" diff --no-color "$PR_MERGE" -- "${CANVAS_FILES[@]}"
-    git -C "$LLAMA_DIR" reset -q -- src/models/diffusion-gemma.cpp
+    git -C "$LLAMA_DIR" diff --no-color "$T1" "$T2" -- "${CANVAS_FILES[@]}"
 } > "$P2"
 
 {
@@ -118,14 +131,16 @@ plus feeding the active block its filled prefix only.
 
 Adapted from upstream https://github.com/ggml-org/llama.cpp/pull/17454.
 
-Base: ${BASE_TAG} + patch 1/3 (also applies on the PR merge alone).
+Base: ${BASE_TAG} + patch 1/3.
 
 ---
 EOF
-    git -C "$LLAMA_DIR" add -N conversion/llada2.py
-    git -C "$LLAMA_DIR" diff --no-color "$PR_MERGE" -- "${LLADA2_FILES[@]}"
-    git -C "$LLAMA_DIR" reset -q -- conversion/llada2.py
+    git -C "$LLAMA_DIR" diff --no-color "$T2" "$T_FULL" -- "${LLADA2_FILES[@]}"
 } > "$P3"
+
+# Restore the working tree: back to the original HEAD, then reapply the series.
+git -C "$LLAMA_DIR" reset --hard "$ORIG" >/dev/null
+"$ROOT/scripts/apply_patches.sh" "$LLAMA_DIR" >/dev/null
 
 echo "==> wrote $P1 ($(wc -l < "$P1") lines)"
 echo "==> wrote $P2 ($(wc -l < "$P2") lines)"

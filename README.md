@@ -341,7 +341,7 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j8
 ```
 
-llama.cpp is pinned to release `v0.5.0` under `third_party/llama.cpp`. The
+llama.cpp is pinned to release `v0.8.0` under `third_party/llama.cpp`. The
 diffusion build is that base plus the patches in `third_party/patches`
 (DiffusionGemma, upstream
 [#24423](https://github.com/ggml-org/llama.cpp/pull/24423); a per-request canvas
