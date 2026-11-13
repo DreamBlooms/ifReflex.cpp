@@ -11,14 +11,14 @@ plus feeding the active block its filled prefix only.
 
 Adapted from upstream https://github.com/ggml-org/llama.cpp/pull/17454.
 
-Base: v0.8.0 + patch 1/3.
+Base: v0.9.0 + patch 1/3.
 
 ---
 diff --git a/common/arg.cpp b/common/arg.cpp
-index 258e3b1fb..3ecb2b52d 100644
+index 43529dc23..8ecc2895f 100644
 --- a/common/arg.cpp
 +++ b/common/arg.cpp
-@@ -4590,6 +4590,22 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
+@@ -4529,6 +4529,22 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
          string_format("add gumbel noise to the logits if temp > 0.0 (default: %s)", params.diffusion.add_gumbel_noise ? "true" : "false"),
          [](common_params & params, const std::string & value) { params.diffusion.add_gumbel_noise = std::stof(value); }
      ).set_examples({ LLAMA_EXAMPLE_DIFFUSION }));
@@ -42,7 +42,7 @@ index 258e3b1fb..3ecb2b52d 100644
          {"--diffusion-eb"}, "MODE",
          "entropy-bound decoder for canvas/block-diffusion models (DiffusionGemma): auto|on|off (default: auto)",
 diff --git a/common/common.h b/common/common.h
-index 803aa5f7e..c0f3c3f91 100644
+index 205eeac2f..b435e0201 100644
 --- a/common/common.h
 +++ b/common/common.h
 @@ -425,6 +425,10 @@ struct common_params_diffusion {
@@ -57,10 +57,10 @@ index 803aa5f7e..c0f3c3f91 100644
      int32_t eb_mode          = 0;     // 0=auto (on for canvas models), 1=force on, 2=off
      float   eb_t_min         = -1.0f; // <0 / <=0 -> not overridden on the command line
 diff --git a/conversion/__init__.py b/conversion/__init__.py
-index 28b564e18..b0639997d 100644
+index 74cb4d8bb..2fd28db21 100644
 --- a/conversion/__init__.py
 +++ b/conversion/__init__.py
-@@ -162,6 +162,7 @@ TEXT_MODEL_MAP: dict[str, str] = {
+@@ -164,6 +164,7 @@ TEXT_MODEL_MAP: dict[str, str] = {
      "LLaDAMoEModel": "llada",
      "LLaDAMoEModelLM": "llada",
      "LLaDAModelLM": "llada",
@@ -367,10 +367,10 @@ index a7f305e29..b8bc8fdc7 100644
  
  void diffusion_generate(llama_context *          ctx,
 diff --git a/gguf-py/gguf/constants.py b/gguf-py/gguf/constants.py
-index f385b9ac4..5e866acdd 100644
+index 812499d42..ad05c7ba3 100644
 --- a/gguf-py/gguf/constants.py
 +++ b/gguf-py/gguf/constants.py
-@@ -710,6 +710,7 @@ class MODEL_ARCH(IntEnum):
+@@ -733,6 +733,7 @@ class MODEL_ARCH(IntEnum):
      SMALLTHINKER     = auto()
      LLADA            = auto()
      LLADA_MOE        = auto()
@@ -378,7 +378,7 @@ index f385b9ac4..5e866acdd 100644
      SEED_OSS         = auto()
      GROVEMOE         = auto()
      APERTUS          = auto()
-@@ -1562,6 +1563,7 @@ MODEL_ARCH_NAMES: dict[MODEL_ARCH, str] = {
+@@ -1648,6 +1649,7 @@ MODEL_ARCH_NAMES: dict[MODEL_ARCH, str] = {
      MODEL_ARCH.SMALLTHINKER:     "smallthinker",
      MODEL_ARCH.LLADA:            "llada",
      MODEL_ARCH.LLADA_MOE:        "llada-moe",
@@ -386,7 +386,7 @@ index f385b9ac4..5e866acdd 100644
      MODEL_ARCH.SEED_OSS:         "seed_oss",
      MODEL_ARCH.GROVEMOE:         "grovemoe",
      MODEL_ARCH.APERTUS:          "apertus",
-@@ -5168,6 +5170,29 @@ MODEL_TENSORS: dict[MODEL_ARCH, list[MODEL_TENSOR]] = {
+@@ -5419,6 +5421,29 @@ MODEL_TENSORS: dict[MODEL_ARCH, list[MODEL_TENSOR]] = {
          MODEL_TENSOR.NEXTN_SHARED_HEAD_NORM,
          MODEL_TENSOR.LAYER_OUT_NORM,
      ],
@@ -417,10 +417,10 @@ index f385b9ac4..5e866acdd 100644
          MODEL_TENSOR.TOKEN_EMBD,
          MODEL_TENSOR.OUTPUT_NORM,
 diff --git a/src/llama-arch.cpp b/src/llama-arch.cpp
-index d7f6e04a2..75d919d51 100644
+index a509857f3..27d9c610f 100644
 --- a/src/llama-arch.cpp
 +++ b/src/llama-arch.cpp
-@@ -141,6 +141,7 @@ static const std::map<llm_arch, const char *> LLM_ARCH_NAMES = {
+@@ -143,6 +143,7 @@ static const std::map<llm_arch, const char *> LLM_ARCH_NAMES = {
      { LLM_ARCH_SMALLTHINKER,     "smallthinker"     },
      { LLM_ARCH_LLADA,            "llada"            },
      { LLM_ARCH_LLADA_MOE,        "llada-moe"        },
@@ -428,7 +428,7 @@ index d7f6e04a2..75d919d51 100644
      { LLM_ARCH_SEED_OSS,         "seed_oss"         },
      { LLM_ARCH_GROVEMOE,         "grovemoe"         },
      { LLM_ARCH_APERTUS,          "apertus"          },
-@@ -1292,6 +1293,7 @@ bool llm_arch_is_diffusion(const llm_arch & arch) {
+@@ -1392,6 +1393,7 @@ bool llm_arch_is_diffusion(const llm_arch & arch) {
          case LLM_ARCH_DREAM:
          case LLM_ARCH_LLADA:
          case LLM_ARCH_LLADA_MOE:
@@ -437,10 +437,10 @@ index d7f6e04a2..75d919d51 100644
          case LLM_ARCH_DIFFUSION_GEMMA:
              return true;
 diff --git a/src/llama-arch.h b/src/llama-arch.h
-index 8c20ae9d0..8fa143f64 100644
+index 955548c0d..2169e9783 100644
 --- a/src/llama-arch.h
 +++ b/src/llama-arch.h
-@@ -145,6 +145,7 @@ enum llm_arch {
+@@ -147,6 +147,7 @@ enum llm_arch {
      LLM_ARCH_SMALLTHINKER,
      LLM_ARCH_LLADA,
      LLM_ARCH_LLADA_MOE,
@@ -449,10 +449,10 @@ index 8c20ae9d0..8fa143f64 100644
      LLM_ARCH_GROVEMOE,
      LLM_ARCH_APERTUS,
 diff --git a/src/llama-model.cpp b/src/llama-model.cpp
-index f88d27d8a..f9dd75017 100644
+index 1a1e8107a..7d05a9a0b 100644
 --- a/src/llama-model.cpp
 +++ b/src/llama-model.cpp
-@@ -277,6 +277,7 @@ static llama_model * llama_model_mapping(llm_arch arch, const llama_model_params
+@@ -281,6 +281,7 @@ static llama_model * llama_model_mapping(llm_arch arch, const llama_model_params
          case LLM_ARCH_BAILINGMOE:
              return new llama_model_bailingmoe(params);
          case LLM_ARCH_BAILINGMOE2:
@@ -460,7 +460,7 @@ index f88d27d8a..f9dd75017 100644
              return new llama_model_bailingmoe2(params);
          case LLM_ARCH_BAILINGMOE3:
              return new llama_model_bailingmoe3(params);
-@@ -3638,6 +3639,7 @@ llama_rope_type llama_model_rope_type(const llama_model * model) {
+@@ -3738,6 +3739,7 @@ llama_rope_type llama_model_rope_type(const llama_model * model) {
          case LLM_ARCH_EXAONE_MOE:
          case LLM_ARCH_MINICPM3:
          case LLM_ARCH_BAILINGMOE2:
