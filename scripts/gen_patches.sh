@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Regenerate the patches under third_party/patches from the llama.cpp submodule.
 #
-# The submodule is pinned to upstream v0.9.0. The diffusion build is that base
+# The submodule is pinned to upstream v1.0.0. The diffusion build is that base
 # plus:
 #   0001-diffusion-gemma-pr24423.patch           upstream PR #24423, rebased
 #   0002-diffusion-gemma-canvas-override.patch   ifreflex's own change on top
 #   0003-llada2.patch                            LLaDA2.x diffusion support
 #
-# Patch 1 is the PR's tree delta rebased onto v0.9.0. Patch 2 and 3 are diffed
+# Patch 1 is the PR's tree delta rebased onto v1.0.0. Patch 2 and 3 are diffed
 # straight against the patch-1 tree (their file sets are disjoint), so all three
 # are regenerated here from the working tree, which must hold the whole applied
 # series (base + patch 1 + patch 2 + patch 3).
@@ -21,7 +21,7 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 LLAMA_DIR=${1:-$ROOT/third_party/llama.cpp}
-BASE_TAG=v0.9.0
+BASE_TAG=v1.0.0
 PATCH_DIR=$ROOT/third_party/patches
 
 P1=$PATCH_DIR/0001-diffusion-gemma-pr24423.patch

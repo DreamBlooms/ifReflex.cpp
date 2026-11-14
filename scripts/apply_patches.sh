@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Apply the ifreflex patches onto the pinned llama.cpp submodule.
 #
-# The submodule is pinned to upstream v0.9.0. The diffusion build needs three
+# The submodule is pinned to upstream v1.0.0. The diffusion build needs three
 # patches on top (DiffusionGemma, PR #24423; the per-request canvas split
 # ifreflex adds; and LLaDA2.x support); they live in third_party/patches and are
 # regenerated with scripts/gen_patches.sh. Safe to run before every build:
@@ -51,7 +51,7 @@ if grep -q "$SENTINEL_TEXT" "$LLAMA_DIR/$SENTINEL_FILE" 2>/dev/null; then
 fi
 
 # Forward apply failed and the sentinel is absent: reset to the checked-out
-# commit (the pinned v0.9.0 under a normal submodule update) and reapply.
+# commit (the pinned v1.0.0 under a normal submodule update) and reapply.
 echo "==> resetting $LLAMA_DIR and reapplying patches"
 git -C "$LLAMA_DIR" reset --hard
 git -C "$LLAMA_DIR" clean -fd
